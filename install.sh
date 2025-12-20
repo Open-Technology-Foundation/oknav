@@ -258,7 +258,7 @@ uninstall_oknav() {
     if [[ "$target" == "$INSTALL_DIR/ok_master" ]]; then
       rm -f "$link"
       success "Removed ${link##*/}"
-      ((removed++))
+      ((++removed))
     fi
   done
 
@@ -267,7 +267,7 @@ uninstall_oknav() {
     if [[ -L "$BIN_DIR/$cmd" ]]; then
       rm -f "$BIN_DIR/$cmd"
       success "Removed $cmd symlink"
-      ((removed++))
+      ((++removed))
     fi
   done
 
@@ -275,14 +275,14 @@ uninstall_oknav() {
   if [[ -d "$INSTALL_DIR" ]]; then
     rm -rf "$INSTALL_DIR"
     success "Removed $INSTALL_DIR"
-    ((removed++))
+    ((++removed))
   fi
 
   # Remove manpage
   if [[ -f "$MAN_DIR/oknav.1" ]]; then
     rm -f "$MAN_DIR/oknav.1"
     success "Removed manual page"
-    ((removed++))
+    ((++removed))
     # Update man database
     command -v mandb >/dev/null 2>&1 && mandb -q 2>/dev/null || true
   fi
@@ -291,7 +291,7 @@ uninstall_oknav() {
   if [[ -f "$COMPLETION_DIR/oknav" ]]; then
     rm -f "$COMPLETION_DIR/oknav"
     success "Removed bash completion"
-    ((removed++))
+    ((++removed))
   fi
 
   # Prompt for config removal
@@ -303,7 +303,7 @@ uninstall_oknav() {
       if [[ "${reply,,}" == "y" ]]; then
         rm -rf "$CONFIG_DIR"
         success "Removed $CONFIG_DIR"
-        ((removed++))
+        ((++removed))
       else
         info "Preserved $CONFIG_DIR"
       fi
