@@ -25,16 +25,23 @@ declare -- temp_file               # Temporary file for output
 declare -- temp_file_path          # Path to temp file reference
 
 # Cleanup function - removes all temporary files
+# Args: [exit_code] - Exit code to preserve (default: 0)
 cleanup() {
-  local file
+  local -i exitcode=${1:-0}
+  # Disable trap to prevent recursion
+  trap - SIGINT SIGTERM EXIT
+  # Remove tracked temp files
+  local -- file
   for file in "${TEMP_FILES[@]}"; do
     [[ -f "$file" ]] && rm -f "$file"
   done
-  # Also clean up any leftover tempfile references
-  rm -f "$TEMP_DIR"/."$SCRIPT_NAME"_*_tempfile 2>/dev/null || true
+  # Remove any leftover temp files (parallel mode runs in subshells, so TEMP_FILES array isn't updated)
+  rm -f "${TEMP_DIR:-/tmp}"/"${SCRIPT_NAME:-}"_*_* 2>/dev/null || true
+  rm -f "${TEMP_DIR:-/tmp}"/."${SCRIPT_NAME:-}"_*_tempfile 2>/dev/null || true
+  exit "$exitcode"
 }
 # Set up cleanup trap
-trap cleanup EXIT INT TERM
+trap 'cleanup $?' SIGINT SIGTERM EXIT
 
 # Usage help function
 usage() {
@@ -76,7 +83,6 @@ Examples:
 Notes:
   - Commands are executed with sudo privileges
   - Servers are discovered from hosts.conf entries with (oknav) option
-  - Use (oknav:ALIAS) to specify which alias to use for multi-alias entries
   - Servers with (exclude) option are excluded by default
   - Servers with (local-only:HOST) are excluded unless running from HOST
   - Use quotes for commands with special characters
@@ -90,36 +96,34 @@ EOT
 # Options: --dry-run, --remove-stale, --clean-local
 install_symlinks() {
   local -i dry_run=0 remove_stale=0 clean_local=0
-  local target_dir="/usr/local/bin"
+  local -- target_dir=/usr/local/bin
   local -i created=0 updated=0 skipped=0 removed=0
 
   # Detect ok_master location: installed (/usr/local/share/oknav/) or dev ($SCRIPT_DIR)
-  local ok_master
-  if [[ -f "/usr/local/share/oknav/ok_master" ]]; then
-    ok_master="/usr/local/share/oknav/ok_master"
-  else
-    ok_master="$SCRIPT_DIR/ok_master"
-  fi
+  local -- ok_master=/usr/local/share/oknav/ok_master
+  [[ -f "$ok_master" ]] || ok_master="$SCRIPT_DIR"/ok_master
 
   # Parse install options
   while (($#)); do
-    case "$1" in
+    case $1 in
       -n|--dry-run) dry_run=1 ;;
       --remove-stale) remove_stale=1 ;;
       --clean-local) clean_local=1 ;;
       -h|--help)
-        echo "Usage: $SCRIPT_NAME install [OPTIONS]"
-        echo "Manage symlinks in /usr/local/bin for all hosts.conf aliases"
-        echo
-        echo "Options:"
-        echo "  -n, --dry-run      Show what would be done without making changes"
-        echo "  --remove-stale     Remove symlinks not in hosts.conf"
-        echo "  --clean-local      Remove local symlinks from $SCRIPT_DIR"
-        echo "  -h, --help         Show this help"
+          cat <<-EOT
+Usage: $SCRIPT_NAME install [OPTIONS]
+Manage symlinks in /usr/local/bin for all hosts.conf aliases
+
+Options:
+  -n, --dry-run      Show what would be done without making changes
+  --remove-stale     Remove symlinks not in hosts.conf
+  --clean-local      Remove local symlinks from $SCRIPT_DIR
+  -h, --help         Show this help
+EOT
         return 0
         ;;
       *)
-        error "Unknown install option: ${1@Q}"
+        error "Unknown install option ${1@Q}"
         return 22
         ;;
     esac
@@ -129,25 +133,25 @@ install_symlinks() {
   # Load hosts.conf (auto-detects /etc/oknav/ or script directory)
   load_hosts_conf
 
-  echo "Installing symlinks to $target_dir..."
-  ((dry_run)) && echo "(dry-run mode - no changes will be made)"
+  info "Installing symlinks to ${target_dir@Q}..."
+  ((dry_run)) && info "(dry-run mode - no changes will be made)"
 
   # Create symlinks for all aliases in hosts.conf
-  local alias target
+  local -- alias target
   for alias in "${ALIAS_LIST[@]}"; do
     target="$target_dir/$alias"
     if [[ -L "$target" ]]; then
       if [[ "$(readlink "$target")" == "$ok_master" ]]; then
         ((++skipped))
       else
-        echo "  update: $alias (was: $(readlink "$target"))"
+        info "  update: $alias (was: $(readlink "$target"))"
         ((dry_run)) || ln -sf "$ok_master" "$target"
         ((++updated))
       fi
     elif [[ -e "$target" ]]; then
       warn "$alias: file exists and is not a symlink - skipping"
     else
-      echo "  create: $alias"
+      info "  create: $alias"
       ((dry_run)) || ln -sf "$ok_master" "$target"
       ((++created))
     fi
@@ -155,13 +159,13 @@ install_symlinks() {
 
   # Remove stale symlinks (pointing to ok_master but not in hosts.conf)
   if ((remove_stale)); then
-    local link name
+    local -- link name
     for link in "$target_dir"/ok*; do
       [[ -L "$link" ]] || continue
       [[ "$(readlink "$link")" == "$ok_master" ]] || continue
       name="${link##*/}"
       [[ -n "${ALIAS_TO_FQDN[$name]:-}" ]] && continue
-      echo "  remove: $name (not in hosts.conf)"
+      info "  remove: $name (not in hosts.conf)"
       ((dry_run)) || rm -f "$link"
       ((++removed))
     done
@@ -169,25 +173,24 @@ install_symlinks() {
 
   # Clean local symlinks
   if ((clean_local)); then
-    local link name
+    local -- link name
     for link in "$SCRIPT_DIR"/ok*; do
       [[ -L "$link" ]] || continue
       name="${link##*/}"
-      [[ "$name" == "ok" ]] && continue  # Keep ok script
-      echo "  remove local: $name"
+      info "  remove local: $name"
       ((dry_run)) || rm -f "$link"
       ((++removed))
     done
   fi
 
   echo
-  echo "Summary: $created created, $updated updated, $skipped unchanged, $removed removed"
+  info "Summary: $created created, $updated updated, $skipped unchanged, $removed removed"
   return 0
 }
 
 # Parse command line arguments
 while (($#)); do
-  case "$1" in
+  case $1 in
     -x|--exclude-host)
       shift
       ok_server_excludes+=("$1");;
@@ -203,7 +206,8 @@ while (($#)); do
       echo "$SCRIPT_NAME $VERSION"
       exit 0 ;;
     -h|--help|help)
-      usage; exit 0;;
+      usage
+      exit 0;;
     -[xptDVh]*)
       # Handle combined short options (e.g., -pD becomes -p -D)
       #shellcheck disable=SC2046
@@ -338,7 +342,7 @@ if (( PARALLEL )); then
 
   # Collect and display outputs in server order
   for server in "${SERVERS[@]}"; do
-    temp_file_path="$TEMP_DIR/.${SCRIPT_NAME}_${server}_tempfile"
+    temp_file_path="$TEMP_DIR"/."$SCRIPT_NAME"_"$server"_tempfile
     
     # Find the temp file for this server
     if [[ -f "$temp_file_path" ]]; then
@@ -369,7 +373,7 @@ else
       elif (( exit_code == 125 )); then
         echo 'Timeout command error'
       elif (( exit_code == 126 )); then
-        echo "Command not found: $server"
+        echo "Command not found ${server@Q}"
       fi
       true  # Continue execution regardless of error
     }

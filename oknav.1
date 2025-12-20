@@ -1,5 +1,5 @@
 .\" OKnav System Manual Page
-.\" Generated: 2025-12-20
+.\" Generated: 2025-12-21
 .\"
 .TH OKNAV 1 "December 2025" "OKnav 2.2.1" "User Commands"
 .\"
@@ -151,7 +151,9 @@ Display help message and exit.
 .SS hosts.conf Format
 Server mappings are defined in
 .I hosts.conf
-located in the same directory as the scripts.
+which is searched in this order:
+.I /etc/oknav/hosts.conf
+(system-wide), then the script directory (development).
 .PP
 .RS
 .I FQDN
@@ -250,6 +252,12 @@ constraint checking.
 .I /etc/oknav/hosts.conf
 System-wide server configuration file defining FQDNs, aliases, and options.
 This is the primary configuration location after installation.
+During installation, existing files are preserved. If missing, the installer
+uses
+.I hosts.conf
+from the source directory (for local installs), or
+.I hosts.conf.example
+as a template.
 .TP
 .I /usr/local/share/oknav/
 Package directory containing the installed scripts:

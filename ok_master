@@ -19,7 +19,6 @@ declare -- USER=${USER:-root}      # SSH user (defaults to current user, fallbac
 declare -- CURDIR=''               # Directory to change to on remote (empty = no change)
 declare -- CMD=''                  # Command to execute (empty = interactive shell)
 declare -- SSHOPTS=''              # Additional SSH options
-declare -i DEBUG=0                 # Debug mode flag (0=off, 1=on)
 
 usage() {
   cat <<EOT
@@ -70,18 +69,24 @@ EOT
 # Supports both short (-r) and long (--root) option formats
 while (($#)); do
   case $1 in
-    -r|--root)
-      USER=root ;;  # Shortcut for -u root
     -u|--user)
       shift
       USER="${1:-$USER}" ;;  # Use specified user or keep current
+    -r|--root)
+      USER=root ;;  # Shortcut for -u root
+
     -d|--dir)
       CURDIR="$PWD" ;;  # Will cd to this directory on remote
-    -h|--help) usage; exit 0 ;;
-    -V|--version) echo "$SCRIPT_NAME $VERSION"; exit 0 ;;
+
     -D|--debug)
       DEBUG=1 ;;  # Enable connection parameter output
-    -[rudhVD]*)
+
+    -V|--version)
+      echo "$SCRIPT_NAME $VERSION"; exit 0 ;;
+
+    -h|--help) usage; exit 0 ;;
+
+    -[urdDVh]*)
       # Handle combined short options (e.g., -rd becomes -r -d)
       #shellcheck disable=SC2046
       set -- '' $(printf -- '-%c ' $(grep -o . <<<"${1:1}")) "${@:2}";;
@@ -102,7 +107,7 @@ declare -- ALIAS="$SERVER"  # Keep original alias for messages
 SERVER=$(resolve_alias "$ALIAS") || {
   case $? in
     1) SERVER="$ALIAS" ;;  # Not in hosts.conf - use alias as hostname
-    2) exit 0 ;;           # Constraint violation (local-only) - message already printed
+    2) exit 2 ;;           # Constraint violation (local-only) - message already printed
   esac
 }
 

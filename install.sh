@@ -184,14 +184,23 @@ install_oknav() {
     success "Linked $cmd"
   done
 
-  # Install config template if not exists
+  # Install config if not exists
+  # Priority: 1) existing /etc/oknav/hosts.conf (preserve)
+  #           2) hosts.conf from source directory (local install)
+  #           3) hosts.conf.example template
   if [[ ! -f "$CONFIG_DIR/hosts.conf" ]]; then
-    info "Installing config template..."
-    if get_source_file "hosts.conf.example" > "$CONFIG_DIR/hosts.conf" 2>/dev/null; then
-      chmod 640 "$CONFIG_DIR/hosts.conf"
+    if get_source_file "hosts.conf" > "$TEMP_DIR/hosts.conf" 2>/dev/null; then
+      # Local install with hosts.conf in source directory
+      info "Installing hosts.conf from source directory..."
+      install -m 640 "$TEMP_DIR/hosts.conf" "$CONFIG_DIR/hosts.conf"
+      success "Installed $CONFIG_DIR/hosts.conf from source"
+    elif get_source_file "hosts.conf.example" > "$TEMP_DIR/hosts.conf" 2>/dev/null; then
+      # Fall back to example template
+      info "Installing config template..."
+      install -m 640 "$TEMP_DIR/hosts.conf" "$CONFIG_DIR/hosts.conf"
       success "Created $CONFIG_DIR/hosts.conf (edit this file to add your servers)"
     else
-      warn "hosts.conf.example not found, skipping config template"
+      warn "No hosts.conf or hosts.conf.example found, skipping config"
     fi
   else
     info "Config already exists: $CONFIG_DIR/hosts.conf (preserved)"

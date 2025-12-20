@@ -46,27 +46,58 @@ else
   declare -r TEMP_DIR="$RUNTIME_DIR"
 fi
 
-# error() - Print error message to stderr
-# Args: message
-error() { >&2 echo "$SCRIPT_NAME: ✗ $*"; }
+#------------------------------------------------------------------------
+declare -ix VERBOSE=1 DEBUG=0
 
-# debug() - Print debug message to stderr
-# Args: message
-declare -ix DEBUG=0        # Debug mode flag
-debug() { ((DEBUG)) || return 0; >&2 echo "$SCRIPT_NAME: DEBUG: $*"; }
+# Color definitions
+if [[ -t 1 && -t 2 ]]; then
+  readonly -- RED=$'\033[0;31m' GREEN=$'\033[0;32m' YELLOW=$'\033[0;33m' CYAN=$'\033[0;36m' BOLD=$'\033[1m' NC=$'\033[0m'
+else
+  readonly -- RED='' GREEN='' YELLOW='' CYAN='' BOLD='' NC=''
+fi
+
+# Utility functions
+_msg() {
+  local -- status="${FUNCNAME[1]}" prefix="$SCRIPT_NAME:" msg
+  case "$status" in
+    vecho)   : ;;
+    info)    prefix+=" ${CYAN}◉${NC}" ;;
+    warn)    prefix+=" ${YELLOW}▲${NC}" ;;
+    success) prefix+=" ${GREEN}✓${NC}" ;;
+    error)   prefix+=" ${RED}✗${NC}" ;;
+    debug)   prefix+=" ${YELLOW}DEBUG:${NC}" ;;
+  esac
+  for msg in "$@"; do printf '%s %s\n' "$prefix" "$msg"; done
+}
+
+# vecho() -
+vecho() { ((VERBOSE)) || return 0; _msg "$@"; }
+
+# info() -
+info() { ((VERBOSE)) || return 0; >&2 _msg "$@"; }
 
 # warn() - Print warning message to stderr
 # Args: message
-warn() { >&2 echo "$SCRIPT_NAME: ▲ $*"; }
+warn() { ((VERBOSE)) || return 0; >&2 _msg "$@"; }
+
+# debug() - Print debug message to stderr
+# Args: message
+debug() { ((DEBUG)) || return 0; >&2 _msg "$@"; }
+
+# success() -
+success() { ((VERBOSE)) || return 0; >&2 _msg "$@" || return 0; }
+
+# error() - Print error message to stderr
+# Args: message
+error() { >&2 _msg "$@"; }
 
 # die() - Print error message and exit with code
 # Args: exit_code [error_message]
 # Returns: exits with provided code (default: 1)
-die() {
-  [[ -z "${*:2}" ]] || error "${*:2}"
-  exit "${1:-1}"
-}
+die() { (($# > 1)) && error "${@:2}"; exit "${1:-0}"; }
 
+
+#---------------------------------------------------------------------------
 # remblanks() - Strip comments and blank lines from input
 # Args: [string...] - Optional string arguments to process
 # Stdin: If no args, reads from stdin (pipe mode)
