@@ -378,5 +378,5 @@ oknav -t 5 echo OK
 
 ## License
 
-See LICENSE file for details.
+GPL-3. See LICENSE file for details.
 
