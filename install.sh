@@ -195,6 +195,7 @@ install_oknav() {
     fi
   else
     info "Config already exists: $CONFIG_DIR/hosts.conf (preserved)"
+    chmod 640 "$CONFIG_DIR/hosts.conf"  # Enforce permissions on existing file
   fi
 
   # Install manpage
