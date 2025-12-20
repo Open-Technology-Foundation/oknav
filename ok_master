@@ -97,7 +97,7 @@ done
 
 # Resolve server alias to FQDN using hosts.conf
 # If not in hosts.conf, use alias directly as hostname (allows ad-hoc servers)
-load_hosts_conf "$SCRIPT_DIR/hosts.conf"
+load_hosts_conf  # Auto-detects /etc/oknav/ or script directory
 declare -- ALIAS="$SERVER"  # Keep original alias for messages
 SERVER=$(resolve_alias "$ALIAS") || {
   case $? in

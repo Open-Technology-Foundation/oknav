@@ -247,24 +247,27 @@ constraint checking.
 .\"
 .SH FILES
 .TP
-.I hosts.conf
-Server configuration file defining FQDNs, aliases, and options.
+.I /etc/oknav/hosts.conf
+System-wide server configuration file defining FQDNs, aliases, and options.
+This is the primary configuration location after installation.
 .TP
-.I ok
-Cluster orchestrator script.
+.I /usr/local/share/oknav/
+Package directory containing the installed scripts:
+.BR ok ", " ok_master ", " common.inc.sh .
 .TP
-.I ok_master
-Individual server handler script. Symlinks to this file provide
-server-specific access commands.
-.TP
-.I common.inc.sh
-Shared configuration and parsing functions.
+.I /usr/local/bin/ok
+Cluster orchestrator (symlink to /usr/local/share/oknav/ok).
 .TP
 .I /usr/local/bin/*
-Installed symlinks created by
-.BR "ok install" .
+Server alias symlinks created by
+.BR "ok install" ,
+pointing to
+.IR /usr/local/share/oknav/ok_master .
 .TP
-.I oknav.bash_completion
+.I /usr/local/share/man/man1/oknav.1
+This manual page.
+.TP
+.I /etc/bash_completion.d/oknav
 Bash completion script for tab completion support.
 .\"
 .SH EXAMPLES

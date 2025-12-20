@@ -20,6 +20,7 @@
 #   debug()             - Print debug message (if DEBUG=1)
 #   die()               - Print error and exit with code
 #   remblanks()         - Strip comments and blank lines from input
+#   find_hosts_conf()   - Locate hosts.conf in /etc/oknav/ or script directory
 #   load_hosts_conf()   - Parse hosts.conf into arrays
 #   resolve_alias()     - Resolve alias to FQDN with constraint checking
 #   is_excluded()       - Check if alias has (exclude) option
@@ -105,14 +106,34 @@ declare -gA ALIAS_OPTIONS=()      # alias -> options string
 declare -ga ALIAS_LIST=()         # ordered list of aliases
 declare -gA FQDN_PRIMARY_ALIAS=() # fqdn -> first (primary) alias
 
+# find_hosts_conf() - Locate hosts.conf in standard locations
+# Args: none
+# Stdout: Path to hosts.conf if found
+# Returns: 0 if found, 1 if not found
+# Search order:
+#   1. /etc/oknav/hosts.conf (system config)
+#   2. $SCRIPT_DIR/hosts.conf (dev/local config)
+find_hosts_conf() {
+  local -- config
+  for config in "/etc/oknav/hosts.conf" "${SCRIPT_DIR:-$(dirname "$0")}/hosts.conf"; do
+    [[ -f "$config" ]] && { echo "$config"; return 0; }
+  done
+  return 1
+}
+
 # load_hosts_conf() - Parse hosts.conf into global arrays
-# Args: [hosts_conf_path] - Path to hosts.conf (default: $SCRIPT_DIR/hosts.conf)
+# Args: [hosts_conf_path] - Path to hosts.conf (default: auto-detect via find_hosts_conf)
 # Returns: 0 on success, dies on error
 # Side effects: Populates ALIAS_TO_FQDN, ALIAS_OPTIONS, ALIAS_LIST
 load_hosts_conf() {
-  local -- hosts_file="${1:-${SCRIPT_DIR:-$(dirname "$0")}/hosts.conf}"
+  local -- hosts_file="${1:-}"
   local -- line fqdn aliases options alias
   local -- options_re='[(]([^)]+)[)][[:space:]]*$'
+
+  # Auto-detect hosts.conf if not provided
+  if [[ -z "$hosts_file" ]]; then
+    hosts_file=$(find_hosts_conf) || die 1 "hosts.conf not found in /etc/oknav/ or script directory"
+  fi
 
   # Clear previous data
   ALIAS_TO_FQDN=()

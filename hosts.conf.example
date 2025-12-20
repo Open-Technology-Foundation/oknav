@@ -1,0 +1,35 @@
+# ==============================================================================
+# OKnav hosts.conf - Server Configuration
+# ==============================================================================
+# Format: FQDN  primary-alias [alias2...]  [(options)]
+#
+# Options (comma-separated in parentheses):
+#   oknav                - Include in cluster operations (first alias only)
+#   exclude              - Exclude from cluster operations (with oknav)
+#   local-only:HOSTNAME  - Restrict access to specified host
+#
+# Notes:
+#   - First alias is the primary/canonical name used in cluster operations
+#   - Entries without (oknav) can still be accessed directly
+#   - Comments start with # and blank lines are ignored
+#
+# Installation:
+#   System-wide: Copy to /etc/oknav/hosts.conf
+#   Local dev:   Copy to same directory as ok/ok_master scripts
+# ==============================================================================
+
+# Production servers (included in cluster operations)
+server1.example.com   srv1 server1   (oknav)
+server2.example.com   srv2 server2   (oknav)
+server3.example.com   srv3 server3   (oknav)
+
+# Development server (only accessible from workstation)
+devbox.local          dev devbox     (oknav,local-only:workstation)
+
+# Backup server (excluded from normal cluster operations)
+backup.example.com    bak backup     (oknav,exclude)
+
+# Ad-hoc server (direct access only, not in cluster)
+adhoc.example.com     adhoc
+
+#fin

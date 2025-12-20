@@ -28,11 +28,45 @@ resolve_alias()    SSH to target server
 ok                 # Cluster operations on (oknav) servers
 ```
 
+## Installation
+
+### Quick Install (Recommended)
+
+```bash
+curl -sSL https://raw.githubusercontent.com/OkusiAssociates/oknav/main/install.sh | sudo bash
+```
+
+This installs OKnav to standard system locations:
+
+| Location | Contents |
+|----------|----------|
+| `/usr/local/share/oknav/` | Package files (ok, ok_master, common.inc.sh) |
+| `/usr/local/bin/` | Executable symlinks |
+| `/etc/oknav/hosts.conf` | Server configuration |
+| `/usr/local/share/man/man1/oknav.1` | Manual page |
+| `/etc/bash_completion.d/oknav` | Bash completion |
+
+### From Source
+
+```bash
+git clone https://github.com/OkusiAssociates/oknav.git
+cd oknav
+sudo ./install.sh
+```
+
+### Uninstall
+
+```bash
+sudo /usr/local/share/oknav/install.sh --uninstall
+# or from source:
+sudo ./install.sh --uninstall
+```
+
 ## Quick Start
 
 ### 1. Configure Servers
 
-Edit `hosts.conf` to define your servers:
+Edit `/etc/oknav/hosts.conf` to define your servers:
 
 ```
 # Format: FQDN  primary-alias [alias2...]  [(options)]
@@ -324,13 +358,22 @@ ok -t 5 echo OK
 | 125 | Timeout command error |
 | 126 | Command not found |
 
-### File Structure
+### Installed File Structure
 
 ```
-ok              # Cluster orchestrator
-ok_master       # Individual server handler
-common.inc.sh   # Shared configuration and functions
-hosts.conf      # Server configuration
+/usr/local/share/oknav/
+├── ok              # Cluster orchestrator
+├── ok_master       # Individual server handler
+├── common.inc.sh   # Shared configuration and functions
+└── VERSION         # Version file
+
+/etc/oknav/
+└── hosts.conf      # Server configuration
+
+/usr/local/bin/
+├── ok              # Symlink to ok
+├── ok_master       # Symlink to ok_master
+└── srv1, srv2...   # Server alias symlinks
 ```
 
 ## License
