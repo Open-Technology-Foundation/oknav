@@ -148,6 +148,8 @@ setup_oknav_env() {
   cp "${PROJECT_DIR}/common.inc.sh" "${TEST_TEMP_DIR}/empty/"
   # Create empty hosts.conf - will fail on "no valid entries"
   echo "# empty" > "${TEST_TEMP_DIR}/empty/hosts.conf"
+  # Override to use this empty hosts.conf instead of system config
+  export OKNAV_HOSTS_CONF="${TEST_TEMP_DIR}/empty/hosts.conf"
   cd "${TEST_TEMP_DIR}/empty" || return 1
 
   run ./oknav uptime

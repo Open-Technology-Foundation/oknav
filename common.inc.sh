@@ -142,9 +142,16 @@ declare -gA FQDN_PRIMARY_ALIAS=() # fqdn -> first (primary) alias
 # Stdout: Path to hosts.conf if found
 # Returns: 0 if found, 1 if not found
 # Search order:
+#   0. $OKNAV_HOSTS_CONF (environment override, for testing)
 #   1. /etc/oknav/hosts.conf (system config)
 #   2. $SCRIPT_DIR/hosts.conf (dev/local config)
 find_hosts_conf() {
+  # Allow override via environment variable (used in testing)
+  if [[ -n "${OKNAV_HOSTS_CONF:-}" && -f "$OKNAV_HOSTS_CONF" ]]; then
+    echo "$OKNAV_HOSTS_CONF"
+    return 0
+  fi
+
   local -- config
   for config in "/etc/oknav/hosts.conf" "${SCRIPT_DIR:-$(dirname "$0")}/hosts.conf"; do
     [[ -f "$config" ]] && { echo "$config"; return 0; }

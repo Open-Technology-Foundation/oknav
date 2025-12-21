@@ -57,6 +57,9 @@ teardown() {
   # Restore hostname
   export HOSTNAME="${ORIG_HOSTNAME}"
 
+  # Clear hosts.conf override
+  unset OKNAV_HOSTS_CONF
+
   # Clean up temp directory
   if [[ -n "$TEST_TEMP_DIR" && -d "$TEST_TEMP_DIR" ]]; then
     rm -rf "$TEST_TEMP_DIR"
@@ -158,6 +161,7 @@ create_server_symlinks() {
 # Usage: create_hosts_conf <target_dir> [entry...]
 # Each entry is a full line: "fqdn alias1 [alias2...] [(options)]"
 # Example: create_hosts_conf "$TEST_TEMP_DIR" "server0.test.local ok0" "devbox.local okdev (local-only:testhost)"
+# NOTE: Also exports OKNAV_HOSTS_CONF to override system config lookup
 create_hosts_conf() {
   local target_dir="$1"
   shift
@@ -177,6 +181,9 @@ create_hosts_conf() {
     echo "# Test hosts.conf"
     printf '%s\n' "${entries[@]}"
   } > "${target_dir}/hosts.conf"
+
+  # Export override so tests use this hosts.conf instead of /etc/oknav/hosts.conf
+  export OKNAV_HOSTS_CONF="${target_dir}/hosts.conf"
 }
 
 # ==============================================================================
