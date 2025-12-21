@@ -68,7 +68,7 @@ _oknav_completion() {
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
     opts="-p --parallel -t --timeout -x --exclude-host -D --debug -h --help -V --version"
-    subcommands="install"
+    subcommands="install add remove list"
 
     case "$prev" in
         -t|--timeout)
@@ -86,12 +86,43 @@ _oknav_completion() {
             COMPREPLY=( $(compgen -W "-n --dry-run --remove-stale --clean-local -h --help" -- "$cur") )
             return 0
             ;;
+        add)
+            # Add subcommand: complete with hostnames or options
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=( $(compgen -W "-n --dry-run -h --help" -- "$cur") )
+            else
+                # Complete with known hosts
+                COMPREPLY=( $(compgen -A hostname -- "$cur") )
+            fi
+            return 0
+            ;;
+        remove)
+            # Remove subcommand: complete with server aliases
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=( $(compgen -W "-n --dry-run -h --help" -- "$cur") )
+            else
+                aliases=$(_oknav_get_aliases 2>/dev/null)
+                COMPREPLY=( $(compgen -W "$aliases" -- "$cur") )
+            fi
+            return 0
+            ;;
+        list)
+            # List subcommand: only help option
+            COMPREPLY=( $(compgen -W "-h --help" -- "$cur") )
+            return 0
+            ;;
         *)
             if [[ "$cur" == -* ]]; then
                 COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
             elif [[ "${COMP_WORDS[1]}" == "install" ]]; then
-                # Already in install subcommand
                 COMPREPLY=( $(compgen -W "-n --dry-run --remove-stale --clean-local -h --help" -- "$cur") )
+            elif [[ "${COMP_WORDS[1]}" == "add" ]]; then
+                COMPREPLY=( $(compgen -A hostname -- "$cur") )
+            elif [[ "${COMP_WORDS[1]}" == "remove" ]]; then
+                aliases=$(_oknav_get_aliases 2>/dev/null)
+                COMPREPLY=( $(compgen -W "$aliases" -- "$cur") )
+            elif [[ "${COMP_WORDS[1]}" == "list" ]]; then
+                COMPREPLY=( $(compgen -W "-h --help" -- "$cur") )
             else
                 # Complete with subcommands and remote commands
                 COMPREPLY=( $(compgen -W "$subcommands" -- "$cur") $(compgen -c -- "$cur") )
