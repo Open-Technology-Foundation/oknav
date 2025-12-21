@@ -34,7 +34,7 @@ set -eu
 shopt -s inherit_errexit
 
 # Global configuration
-declare -r VERSION='2.2.2'
+declare -r VERSION='2.3.0'
 
 # Set up runtime directory for temporary files
 # Prefers XDG_RUNTIME_DIR (typically /run/user/UID), falls back to /tmp
