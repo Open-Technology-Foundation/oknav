@@ -383,12 +383,13 @@ remove_host() {
 # ------------------------------------------------------------------------------
 # list_hosts() - List all host symlinks pointing to ok_master
 # Shows which hosts are defined in hosts.conf vs ad-hoc additions.
-# Args: [-R|--reachable] [-h|--help]
+# Args: [-R|--reachable] [-p|--parallel] [-h|--help]
 # Returns: 0 always
 # ------------------------------------------------------------------------------
 list_hosts() {
   local -- target_dir=${OKNAV_TARGET_DIR:-/usr/local/bin}
   local -i reachable_check=0
+  local -i parallel_mode=0
 
   # Locate ok_master: prefer installed location, fall back to dev directory
   local -- ok_master=/usr/local/share/oknav/ok_master
@@ -399,15 +400,18 @@ list_hosts() {
     case $1 in
       -R|--reachable)
         reachable_check=1 ;;
+      -p|--parallel)
+        parallel_mode=1 ;;
       -h|--help)
         cat <<-'EOT'
-	Usage: oknav list [-R|--reachable]
+	Usage: oknav list [-R|--reachable] [-p|--parallel]
 
 	List all host symlinks in /usr/local/bin pointing to ok_master.
 	Shows whether each host is defined in hosts.conf or added ad-hoc.
 
 	Options:
 	  -R, --reachable  Test each host for SSH connectivity (5s timeout)
+	  -p, --parallel   Test hosts in parallel (use with -R)
 	  -h, --help       Show this help
 	EOT
         return 0 ;;
@@ -436,8 +440,9 @@ list_hosts() {
     aliases+=("$name")
   done < <(find "$target_dir" -maxdepth 1 -type l 2>/dev/null | sort)
 
-  # Display with status
-  local -- fqdn source status
+  # Build host info array (name:source:fqdn)
+  local -a host_info=()
+  local -- fqdn source
   for name in "${aliases[@]}"; do
     if [[ -n "${ALIAS_TO_FQDN[$name]:-}" ]]; then
       fqdn="${ALIAS_TO_FQDN[$name]}"
@@ -446,18 +451,77 @@ list_hosts() {
       fqdn="$name"
       source="ad-hoc"
     fi
-
-    if ((reachable_check)); then
-      if timeout 5 ssh -o ConnectTimeout=3 -o BatchMode=yes "$fqdn" hostname >/dev/null 2>&1; then
-        status="✓"
-      else
-        status="✗"
-      fi
-      printf '%-12s %-10s  %s\n' "$name" "$source" "$status"
-    else
-      printf '%-12s %s\n' "$name" "$source"
-    fi
+    host_info+=("$name:$source:$fqdn")
   done
+
+  # Display with status
+  if ((reachable_check)); then
+    if ((parallel_mode)); then
+      # Parallel reachability check
+      local -a pids=() temp_files=()
+      local -- temp_file
+
+      for info in "${host_info[@]}"; do
+        name="${info%%:*}"
+        temp_file=$(mktemp "$TEMP_DIR"/oknav_list_"$name"_XXXXXX) || continue
+        temp_files+=("$temp_file")
+
+        # Background SSH test
+        (
+          fqdn="${info##*:}"
+          if timeout 5 ssh -o ConnectTimeout=3 -o BatchMode=yes "$fqdn" hostname >/dev/null 2>&1; then
+            echo "✓"
+          else
+            echo "✗"
+          fi
+        ) > "$temp_file" 2>/dev/null &
+        pids+=($!)
+      done
+
+      # Wait for all background processes
+      for pid in "${pids[@]}"; do
+        wait "$pid" 2>/dev/null || true
+      done
+
+      # Display results in order
+      local -i i=0
+      local -- status
+      for info in "${host_info[@]}"; do
+        name="${info%%:*}"
+        source="${info#*:}"
+        source="${source%%:*}"
+        status=$(<"${temp_files[$i]}") || status="✗"
+        printf '%-12s %-10s  %s\n' "$name" "$source" "$status"
+        ((++i))
+      done
+
+      # Cleanup temp files
+      rm -f "${temp_files[@]}" 2>/dev/null || true
+    else
+      # Sequential reachability check
+      local -- status
+      for info in "${host_info[@]}"; do
+        name="${info%%:*}"
+        source="${info#*:}"
+        source="${source%%:*}"
+        fqdn="${info##*:}"
+        if timeout 5 ssh -o ConnectTimeout=3 -o BatchMode=yes "$fqdn" hostname >/dev/null 2>&1; then
+          status="✓"
+        else
+          status="✗"
+        fi
+        printf '%-12s %-10s  %s\n' "$name" "$source" "$status"
+      done
+    fi
+  else
+    # No reachability check - just list
+    for info in "${host_info[@]}"; do
+      name="${info%%:*}"
+      source="${info#*:}"
+      source="${source%%:*}"
+      printf '%-12s %s\n' "$name" "$source"
+    done
+  fi
 }
 
 # Parse command line arguments

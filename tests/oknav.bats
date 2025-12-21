@@ -835,4 +835,43 @@ EOF
   [[ "$output" == *"✓"* ]] || [[ "$output" == *"✗"* ]]
 }
 
+@test "oknav list -p shows parallel option in help" {
+  setup_oknav_env ok0
+  cd "$TEST_TEMP_DIR" || return 1
+  run ./oknav list --help
+  ((status == 0))
+  assert_output_contains "--parallel"
+  assert_output_contains "parallel"
+}
+
+@test "oknav list -R -p runs parallel reachability check" {
+  setup_oknav_env ok0 ok1
+  cd "$TEST_TEMP_DIR" || return 1
+  OKNAV_TARGET_DIR="$TEST_TEMP_DIR" run timeout 15 ./oknav list -R -p
+  ((status == 0))
+  assert_output_contains "ok0"
+  assert_output_contains "ok1"
+  [[ "$output" == *"✓"* ]] || [[ "$output" == *"✗"* ]]
+}
+
+@test "oknav list --reachable --parallel works with long form" {
+  setup_oknav_env ok0
+  cd "$TEST_TEMP_DIR" || return 1
+  OKNAV_TARGET_DIR="$TEST_TEMP_DIR" run timeout 10 ./oknav list --reachable --parallel
+  ((status == 0))
+  assert_output_contains "ok0"
+  [[ "$output" == *"✓"* ]] || [[ "$output" == *"✗"* ]]
+}
+
+@test "oknav list -p without -R just lists hosts" {
+  setup_oknav_env ok0
+  cd "$TEST_TEMP_DIR" || return 1
+  OKNAV_TARGET_DIR="$TEST_TEMP_DIR" run ./oknav list -p
+  ((status == 0))
+  assert_output_contains "ok0"
+  assert_output_contains "hosts.conf"
+  # Should not have reachability symbols when -R not specified
+  [[ "$output" != *"✓"* ]] && [[ "$output" != *"✗"* ]]
+}
+
 #fin
