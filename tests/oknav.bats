@@ -688,4 +688,99 @@ EOF
   [[ "$output" =~ alpha.*middle.*zebra ]]
 }
 
+# ==============================================================================
+# Double-Dash Separator Tests
+# ==============================================================================
+
+@test "-- bypasses subcommand and forces multi-execute" {
+  setup_oknav_env ok0 ok1
+  cd "$TEST_TEMP_DIR" || return 1
+  # Without --, 'list' would be a subcommand
+  # With --, 'list' is treated as a command to execute
+  run ./oknav -D -- list /tmp 2>&1
+  # Should show command in debug output, not run list subcommand
+  assert_output_contains 'Command to execute: list /tmp'
+}
+
+@test "-- works with parallel option" {
+  setup_oknav_env ok0 ok1
+  cd "$TEST_TEMP_DIR" || return 1
+  run ./oknav -p -D -- install 2>&1
+  # Should show parallel mode and 'install' as command
+  assert_output_contains "Execution mode: parallel"
+  assert_output_contains "Command to execute: install"
+}
+
+@test "-- at end with no command shows usage" {
+  setup_oknav_env ok0
+  cd "$TEST_TEMP_DIR" || return 1
+  run ./oknav --
+  ((status == 1))
+  assert_output_contains "Usage:"
+}
+
+@test "subcommand without -- runs normally" {
+  setup_oknav_env ok0
+  cd "$TEST_TEMP_DIR" || return 1
+  # 'list' without -- should run the list subcommand
+  OKNAV_TARGET_DIR="$TEST_TEMP_DIR" run ./oknav list
+  ((status == 0))
+  # Should show hosts.conf status, not execute on servers
+  assert_output_contains "(hosts.conf)"
+}
+
+# ==============================================================================
+# Conflict Detection Tests
+# ==============================================================================
+
+@test "install warns about alias conflicting with subcommand" {
+  # Create hosts.conf with an alias that conflicts with 'list' subcommand
+  create_server_symlinks "$TEST_TEMP_DIR" ok0 list
+  create_hosts_conf "$TEST_TEMP_DIR" \
+    "ok0.test.local ok0 (oknav)" \
+    "listserver.local list (oknav)"
+  cp "${PROJECT_DIR}/oknav" "${TEST_TEMP_DIR}/"
+  cd "$TEST_TEMP_DIR" || return 1
+
+  run ./oknav install -n
+  # Should warn about the conflict
+  assert_output_contains "alias 'list' conflicts with oknav subcommand"
+  assert_output_contains "oknav -- list"
+}
+
+@test "install does not warn for non-conflicting aliases" {
+  setup_oknav_env ok0 ok1 ok2
+  cd "$TEST_TEMP_DIR" || return 1
+  run ./oknav install -n
+  # Should not contain conflict warnings
+  assert_output_not_contains "conflicts with oknav subcommand"
+}
+
+# ==============================================================================
+# Improved Error Message Tests
+# ==============================================================================
+
+@test "typo suggestion for 'instal' typo" {
+  # Create environment with no oknav servers
+  create_hosts_conf "$TEST_TEMP_DIR" "ok0.test.local ok0"  # No (oknav) option
+  cp "${PROJECT_DIR}/oknav" "${TEST_TEMP_DIR}/"
+  cp "${PROJECT_DIR}/common.inc.sh" "${TEST_TEMP_DIR}/"
+  cd "$TEST_TEMP_DIR" || return 1
+
+  run ./oknav instal
+  ((status == 1))
+  assert_output_contains "Did you mean: oknav install"
+}
+
+@test "typo suggestion for 'lst' typo" {
+  create_hosts_conf "$TEST_TEMP_DIR" "ok0.test.local ok0"
+  cp "${PROJECT_DIR}/oknav" "${TEST_TEMP_DIR}/"
+  cp "${PROJECT_DIR}/common.inc.sh" "${TEST_TEMP_DIR}/"
+  cd "$TEST_TEMP_DIR" || return 1
+
+  run ./oknav lst
+  ((status == 1))
+  assert_output_contains "Did you mean: oknav list"
+}
+
 #fin

@@ -12,6 +12,9 @@
 #   remove       Remove ad-hoc host launcher (requires sudo)
 #   list         List installed host symlinks and their source
 #
+# Use -- to force multi-execute mode (bypass subcommand detection):
+#   oknav -- list uptime    Execute 'list uptime' on servers, not list subcommand
+#
 # Exit codes:
 #   0   Success
 #   1   General error (no servers, missing config, etc.)
@@ -35,6 +38,7 @@ source "$SCRIPT_DIR"/common.inc.sh || exit 1
 # ------------------------------------------------------------------------------
 declare -i PARALLEL=0              # Execution mode: 0=sequential, 1=parallel
 declare -i TIMEOUT=30              # SSH connection timeout in seconds
+declare -i FORCE_EXEC=0            # Force multi-execute mode (bypass subcommands)
 declare -a TEMP_FILES=()           # Temp files to clean up on exit
 declare -a ok_server_excludes=()   # Servers excluded via -x option
 
@@ -77,6 +81,7 @@ hosts.conf entries marked with (oknav) option.
 
 Usage:
   $SCRIPT_NAME [OPTIONS] <command>          Execute command on all servers
+  $SCRIPT_NAME [OPTIONS] -- <command>       Force multi-execute (bypass subcommands)
   $SCRIPT_NAME install [OPTIONS]            Manage symlinks from hosts.conf
   $SCRIPT_NAME add <hostname> [alias...]    Add ad-hoc launcher (sudo required)
   $SCRIPT_NAME remove <alias>...            Remove launcher (sudo required)
@@ -100,6 +105,7 @@ Examples:
   $SCRIPT_NAME -p 'df -h'                   Parallel execution
   $SCRIPT_NAME -x ok0 -x ok1 uptime         Exclude multiple hosts
   $SCRIPT_NAME -pt 10 uptime                Parallel + 10s timeout
+  $SCRIPT_NAME -- list /tmp                 Force 'list /tmp' as command (not subcommand)
   $SCRIPT_NAME install --dry-run            Preview symlink changes
   $SCRIPT_NAME add ai.okusi.id ai           Create 'ai' launcher for ai.okusi.id
   $SCRIPT_NAME remove ai                    Remove 'ai' launcher
@@ -150,7 +156,20 @@ install_symlinks() {
   done
 
   # Load hosts.conf (auto-detects /etc/oknav/ or script directory)
+  #shellcheck disable=SC2119
   load_hosts_conf
+
+  # Check for aliases that conflict with subcommand names
+  local -a reserved_names=(install add remove list help)
+  local -- alias_name reserved
+  for alias_name in "${ALIAS_LIST[@]}"; do
+    for reserved in "${reserved_names[@]}"; do
+      if [[ "$alias_name" == "$reserved" ]]; then
+        warn "alias '$alias_name' conflicts with oknav subcommand"
+        warn "  use 'oknav -- $alias_name <cmd>' to execute on this server"
+      fi
+    done
+  done
 
   info "Installing symlinks to ${target_dir@Q}..."
   ((dry_run)) && info "(dry-run mode - no changes will be made)"
@@ -388,6 +407,7 @@ list_hosts() {
   fi
 
   # Load hosts.conf for status checking
+  #shellcheck disable=SC2119
   load_hosts_conf
 
   # Find symlinks pointing to ok_master (match by target basename)
@@ -438,6 +458,11 @@ while (($#)); do
       # Handle combined short options (e.g., -pD becomes -p -D)
       #shellcheck disable=SC2046
       set -- '' $(printf -- "-%c " $(grep -o . <<<"${1:1}")) "${@:2}" ;;
+    --)
+      # End of options, force multi-execute mode (bypass subcommand check)
+      FORCE_EXEC=1
+      shift
+      break ;;
     -*)
       die 22 "Invalid option ${1@Q}" ;;
     *)
@@ -447,34 +472,37 @@ while (($#)); do
   shift
 done
 
-# Handle subcommands
-case "${1:-}" in
-  install)
-    shift
-    install_symlinks "$@"
-    exit $?
-    ;;
-  add)
-    shift
-    add_host "$@"
-    exit $?
-    ;;
-  remove)
-    shift
-    remove_host "$@"
-    exit $?
-    ;;
-  list)
-    shift
-    list_hosts "$@"
-    exit $?
-    ;;
-esac
+# Handle subcommands (skip if -- was used to force multi-execute)
+if ((! FORCE_EXEC)); then
+  case "${1:-}" in
+    install)
+      shift
+      install_symlinks "$@"
+      exit $?
+      ;;
+    add)
+      shift
+      add_host "$@"
+      exit $?
+      ;;
+    remove)
+      shift
+      remove_host "$@"
+      exit $?
+      ;;
+    list)
+      shift
+      list_hosts "$@"
+      exit $?
+      ;;
+  esac
+fi
 
 # If no command provided, show usage
 (($#)) || { >&2 usage; exit 1; }
 
 # Load hosts.conf configuration (auto-detects /etc/oknav/ or script directory)
+#shellcheck disable=SC2119
 load_hosts_conf
 
 # Discover servers from hosts.conf with (oknav) option
@@ -508,7 +536,23 @@ for alias in "${ALIAS_LIST[@]}"; do
 done
 
 # Validate server discovery
-((${#SERVERS[@]})) || die 1 "No servers with (oknav) option found in hosts.conf"
+if ((${#SERVERS[@]} == 0)); then
+  if [[ -n "${1:-}" ]]; then
+    error "No (oknav) servers found for command: ${1@Q}"
+    # Suggest similar subcommand names for common typos
+    case "$1" in
+      instal|instll|inst|nstall)
+        info "Did you mean: oknav install" ;;
+      lst|lis|lsit)
+        info "Did you mean: oknav list" ;;
+      ad|adds|dad)
+        info "Did you mean: oknav add" ;;
+      remov|rm|del|delete|rmove)
+        info "Did you mean: oknav remove" ;;
+    esac
+  fi
+  die 1 "Ensure hosts.conf has entries with (oknav) option"
+fi
 
 # Debug output for server discovery
 if ((DEBUG)); then
