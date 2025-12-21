@@ -1,31 +1,29 @@
 # OKnav
 
-A lightweight SSH orchestration system for managing commands across multiple servers. Provides both individual server access via symlink-based routing and coordinated cluster operations with parallel execution.
+SSH orchestration for multi-server environments. Connect to individual servers via symlinks or execute commands across your entire cluster.
 
 **Version**: 2.3.0
 
 ## Overview
 
-OKnav consists of two components:
-
 | Component | Purpose |
 |-----------|---------|
 | `ok_master` | Individual server SSH handler (invoked via symlinks) |
 | `oknav` | Cluster orchestrator for multi-server commands |
+| `common.inc.sh` | Shared configuration and hosts.conf parsing |
 
-### Architecture
+### How It Works
 
 ```
-hosts.conf          # Server configuration (FQDNs, aliases, options)
-     |
-     v
-ok_master  <------- srv1, srv2, srv3 (symlinks)
-     |                   |
-     v                   v
-resolve_alias()    SSH to target server
-     |
-     v
-oknav              # Cluster operations on (oknav) servers
+hosts.conf                      # Server definitions: FQDN → aliases
+    │
+    ├── ok_master ◄── srv1      # Symlink name determines target
+    │       │         srv2      # srv1 → lookup hosts.conf → FQDN → SSH
+    │       │         srv3
+    │       ▼
+    │   resolve_alias()         # Returns FQDN, checks constraints
+    │
+    └── oknav                   # Discovers (oknav) servers, executes on all
 ```
 
 ## Installation
@@ -133,133 +131,67 @@ adhoc.example.com     adhoc
 
 ## Individual Server Access
 
-Each symlink (srv1, srv2, etc.) provides enhanced SSH access to its corresponding server.
-
-### Usage
+Each symlink provides SSH access with user switching and directory preservation.
 
 ```bash
-ALIAS [OPTIONS] [command]    # Execute command
-ALIAS [OPTIONS]              # Interactive shell
+srv1 [OPTIONS] [command]     # Execute command or start shell
 ```
-
-### Options
 
 | Option | Description |
 |--------|-------------|
-| `-r, --root` | Connect as root user |
+| `-r, --root` | Connect as root |
 | `-u, --user USER` | Connect as specified user |
-| `-d, --dir` | Preserve current working directory |
+| `-d, --dir` | Preserve current directory |
 | `-D, --debug` | Show connection parameters |
-| `-V, --version` | Show version |
-| `-h, --help` | Show help |
-
-### Examples
 
 ```bash
-# Basic access
 srv1                     # Interactive shell
 srv1 uptime              # Execute command
 srv1 -r                  # Root shell
-
-# User switching
-srv1 -u admin whoami     # Connect as admin
-srv2 -u deploy git pull  # Deploy as specific user
-
-# Directory preservation
-srv1 -d                  # Shell in current directory
-srv1 -d ls -la           # List files in current dir on remote
-
-# Combined options
 srv1 -rd                 # Root shell in current directory
-srv1 -Du admin pwd       # Debug with user switch
-
-# Complex commands (use quotes)
-srv1 "df -h | grep data"
-srv1 'ps aux | grep nginx'
+srv1 -u deploy git pull  # Run as specific user
+srv1 "df -h | grep data" # Complex commands (use quotes)
 ```
 
 ## Cluster Operations
 
-The `oknav` orchestrator runs commands across all servers marked with `(oknav)` in `hosts.conf`.
-
-### Usage
+Execute commands across all servers marked with `(oknav)` in `hosts.conf`.
 
 ```bash
 oknav [OPTIONS] <command>        # Execute on all servers
 oknav install [OPTIONS]          # Manage symlinks from hosts.conf
-oknav add <hostname> [alias...]  # Add ad-hoc host launcher
-oknav remove <alias>...          # Remove ad-hoc host launcher
+oknav add <hostname> [alias...]  # Add ad-hoc launcher (sudo)
+oknav remove <alias>...          # Remove launcher (sudo)
 ```
-
-### Options
 
 | Option | Description |
 |--------|-------------|
-| `-p, --parallel` | Execute in parallel across all servers |
+| `-p, --parallel` | Execute simultaneously |
 | `-t, --timeout SECS` | Connection timeout (default: 30) |
-| `-x, --exclude-host HOST` | Exclude server from this run (repeatable) |
-| `-D, --debug` | Show discovery and execution details |
-| `-V, --version` | Show version |
-| `-h, --help` | Show help |
-
-### Examples
+| `-x, --exclude-host HOST` | Exclude server (repeatable) |
+| `-D, --debug` | Show discovery details |
 
 ```bash
-# Sequential execution (default)
-oknav uptime             # Check uptime on all servers
-oknav df -h              # Check disk space
-oknav systemctl status ssh  # Check service status
-
-# Parallel execution
-oknav -p uptime          # All servers simultaneously
-oknav -p free -m         # Memory status in parallel
-
-# With timeout
-oknav -t 60 apt update   # 60-second timeout
-oknav -pt 10 uptime      # Parallel with 10-second timeout
-
-# Exclusions
-oknav -x srv1 uptime     # Exclude srv1 from this run
-oknav -x srv1 -x srv2 df # Exclude multiple servers
-
-# Debug mode
-oknav -D hostname        # Shows discovered servers
-oknav -Dp echo test      # Debug with parallel execution
-
-# Complex commands
-oknav "mysql -e 'SHOW DATABASES;'"
-oknav -p "ps aux | grep apache"
+oknav uptime             # Sequential (default)
+oknav -p df -h           # Parallel execution
+oknav -pt 10 uptime      # Parallel + 10s timeout
+oknav -x srv1 uptime     # Exclude srv1
+oknav -D hostname        # Debug: show discovered servers
 ```
 
 ### Install Subcommand
 
-Manage symlinks in `/usr/local/bin`:
+Create symlinks in `/usr/local/bin` for all `hosts.conf` aliases:
 
 ```bash
-oknav install [OPTIONS]
-```
-
-| Option | Description |
-|--------|-------------|
-| `-n, --dry-run` | Preview changes without making them |
-| `--remove-stale` | Remove symlinks not in hosts.conf |
-| `--clean-local` | Remove local symlinks from script directory |
-| `-h, --help` | Show install help |
-
-```bash
-# Create/update symlinks
-sudo oknav install
-
-# Preview what would happen
-oknav install --dry-run
-
-# Full cleanup and reinstall
-sudo oknav install --remove-stale --clean-local
+sudo oknav install              # Create/update symlinks
+oknav install --dry-run         # Preview changes
+sudo oknav install --remove-stale   # Remove stale symlinks
 ```
 
 ### Add/Remove Subcommands
 
-Quickly add launchers for ad-hoc hosts without editing `hosts.conf`:
+Create ad-hoc launchers without editing `hosts.conf` (requires sudo):
 
 ```bash
 oknav add <hostname> [alias...]   # Add launcher(s)
@@ -268,27 +200,25 @@ oknav remove <alias>...           # Remove launcher(s)
 
 | Option | Description |
 |--------|-------------|
-| `-n, --dry-run` | Preview changes without making them |
+| `-n, --dry-run` | Preview changes |
 | `-h, --help` | Show subcommand help |
 
 ```bash
-# Add launcher using hostname as alias
-sudo oknav add ai.okusi.id
+# Add launcher (hostname used as alias)
+oknav add ai.okusi.id
 
-# Add with custom short aliases
-sudo oknav add ai.okusi.id ai ok-ai
-
-# Preview changes first
-sudo oknav add -n ai.okusi.id
+# Add with custom aliases
+oknav add ai.okusi.id ai ok-ai
 
 # Remove launchers
-sudo oknav remove ai ok-ai
+oknav remove ai ok-ai
 ```
 
 **Notes:**
-- Hostname must be resolvable (via DNS or `/etc/hosts`)
-- Creates symlinks in `/usr/local/bin` pointing to `ok_master`
-- Ad-hoc hosts are not included in cluster operations (use `hosts.conf` for that)
+- Hostname must be resolvable (DNS or `/etc/hosts`)
+- Creates symlinks in `/usr/local/bin → ok_master`
+- Ad-hoc hosts are **not** in cluster operations (use `hosts.conf` for that)
+- Interactive prompt if symlink exists pointing elsewhere
 
 ## Output Format
 
@@ -388,7 +318,8 @@ oknav -t 5 echo OK
 |------|---------|
 | 0 | Success |
 | 1 | General error |
-| 22 | Invalid option |
+| 2 | Local-only constraint violated (ok_master) |
+| 22 | Invalid option (EINVAL) |
 | 124 | Timeout reached |
 | 125 | Timeout command error |
 | 126 | Command not found |
