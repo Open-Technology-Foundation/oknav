@@ -1,7 +1,7 @@
 .\" OKnav System Manual Page
 .\" Generated: 2025-12-21
 .\"
-.TH OKNAV 1 "December 2025" "OKnav 2.2.2" "User Commands"
+.TH OKNAV 1 "December 2025" "OKnav 2.3.0" "User Commands"
 .\"
 .SH NAME
 oknav \- SSH orchestration system for multi-server command execution
@@ -13,6 +13,15 @@ oknav \- SSH orchestration system for multi-server command execution
 .br
 .B oknav install
 .RI [ OPTIONS ]
+.br
+.B oknav add
+.RI [ \-n ]
+.I hostname
+.RI [ alias... ]
+.br
+.B oknav remove
+.RI [ \-n ]
+.IR alias ...
 .br
 .I ALIAS
 .RI [ OPTIONS ]
@@ -68,6 +77,25 @@ Create symlinks in
 .I /usr/local/bin
 for all aliases defined in hosts.conf.
 .RE
+.PP
+.B oknav add
+.I hostname
+.RI [ alias... ]
+.RS
+Create ad-hoc launcher symlinks for
+.I hostname
+without editing hosts.conf. If no aliases are specified, the hostname
+is used as the alias. Requires sudo. The hostname must be resolvable
+via DNS or /etc/hosts.
+.RE
+.PP
+.B oknav remove
+.IR alias ...
+.RS
+Remove ad-hoc launcher symlinks created by
+.BR "oknav add" .
+Only removes symlinks pointing to ok_master. Requires sudo.
+.RE
 .\"
 .SS ok_master \- Individual Server Handler
 Invoked through symlinks, provides SSH access to individual servers.
@@ -122,6 +150,22 @@ Remove symlinks from the script directory (except
 .TP
 .BR \-h ", " \-\-help
 Display install help and exit.
+.\"
+.SS oknav add Options
+.TP
+.BR \-n ", " \-\-dry\-run
+Show what would be done without making changes.
+.TP
+.BR \-h ", " \-\-help
+Display add help and exit.
+.\"
+.SS oknav remove Options
+.TP
+.BR \-n ", " \-\-dry\-run
+Show what would be done without making changes.
+.TP
+.BR \-h ", " \-\-help
+Display remove help and exit.
 .\"
 .SS ok_master Options (Individual Server)
 .TP
@@ -220,8 +264,12 @@ Success.
 .B 1
 General error, including unknown alias or hosts.conf issues.
 .TP
+.B 2
+Local-only constraint violated (ok_master only). The server is
+restricted to a specific host and the current hostname does not match.
+.TP
 .B 22
-Invalid command-line option.
+Invalid command-line option (EINVAL).
 .TP
 .B 124
 Connection timeout reached.
@@ -233,6 +281,10 @@ Timeout command error.
 Command not found (server unreachable).
 .\"
 .SH ENVIRONMENT
+.TP
+.B OKNAV_HOSTS_CONF
+Override path to hosts.conf. Primarily used for testing.
+Takes precedence over default search paths.
 .TP
 .B XDG_RUNTIME_DIR
 Used for temporary files in parallel mode. Falls back to
@@ -333,6 +385,20 @@ Preview symlink changes without making them.
 .TP
 .B sudo oknav install \-\-remove\-stale
 Remove orphaned symlinks not in hosts.conf.
+.\"
+.SS Ad-hoc Launchers
+.TP
+.B sudo oknav add ai.okusi.id
+Create launcher using hostname as alias.
+.TP
+.B sudo oknav add ai.okusi.id ai ok\-ai
+Create launchers with custom aliases.
+.TP
+.B oknav add \-n ai.okusi.id
+Preview what add would do.
+.TP
+.B sudo oknav remove ai ok\-ai
+Remove ad-hoc launchers.
 .\"
 .SS Output Format
 Cluster operations prefix each server's output:
