@@ -142,8 +142,8 @@ run_ok_master_debug() {
   create_hosts_conf "$TEST_TEMP_DIR" "devbox.local okdev (local-only:some-other-host)"
   cd "$TEST_TEMP_DIR" || return 1
   run ./okdev uptime
-  # Should exit 0 (graceful exit) with message
-  ((status == 0))
+  # Should exit 2 (constraint violation) with error message
+  ((status == 2))
   assert_output_contains "restricted to host"
 }
 

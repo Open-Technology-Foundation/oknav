@@ -94,6 +94,7 @@ EOF
 
   run bash -c '
     export SCRIPT_NAME=test SCRIPT_DIR="'"$TEST_TEMP_DIR"'"
+    export OKNAV_HOSTS_CONF="'"$TEST_TEMP_DIR"'/hosts.conf"
     source "'"${PROJECT_DIR}"'/common.inc.sh"
     load_hosts_conf
     echo "${#ALIAS_TO_FQDN[@]}"
@@ -112,6 +113,7 @@ EOF
 
   run bash -c '
     export SCRIPT_NAME=test SCRIPT_DIR="'"$TEST_TEMP_DIR"'"
+    export OKNAV_HOSTS_CONF="'"$TEST_TEMP_DIR"'/hosts.conf"
     source "'"${PROJECT_DIR}"'/common.inc.sh"
     load_hosts_conf
     echo "${#ALIAS_TO_FQDN[@]}"
@@ -135,6 +137,7 @@ EOF
 
   run bash -c '
     export SCRIPT_NAME=test SCRIPT_DIR="'"$TEST_TEMP_DIR"'"
+    export OKNAV_HOSTS_CONF="'"$TEST_TEMP_DIR"'/hosts.conf"
     source "'"${PROJECT_DIR}"'/common.inc.sh"
     load_hosts_conf
   '
@@ -151,6 +154,7 @@ EOF
 
   run bash -c '
     export SCRIPT_NAME=test SCRIPT_DIR="'"$TEST_TEMP_DIR"'"
+    export OKNAV_HOSTS_CONF="'"$TEST_TEMP_DIR"'/hosts.conf"
     source "'"${PROJECT_DIR}"'/common.inc.sh"
     load_hosts_conf
     echo "${ALIAS_LIST[*]}"

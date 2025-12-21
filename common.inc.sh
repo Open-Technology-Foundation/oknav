@@ -94,7 +94,7 @@ error() { >&2 _msg "$@"; }
 # die() - Print error message and exit with code
 # Args: exit_code [error_message]
 # Returns: exits with provided code (default: 1)
-die() { (($# > 1)) && error "${@:2}"; exit "${1:-0}"; }
+die() { (($# > 1)) && error "${@:2}"; exit "${1:-1}"; }
 
 
 #---------------------------------------------------------------------------
