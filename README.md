@@ -2,7 +2,7 @@
 
 A lightweight SSH orchestration system for managing commands across multiple servers. Provides both individual server access via symlink-based routing and coordinated cluster operations with parallel execution.
 
-**Version**: 2.2.1
+**Version**: 2.2.2
 
 ## Overview
 
