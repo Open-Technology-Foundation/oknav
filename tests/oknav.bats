@@ -603,4 +603,89 @@ EOF
   assert_output_contains "nonexistent2"
 }
 
+# ==============================================================================
+# List Subcommand Tests
+# ==============================================================================
+
+@test "oknav list -h shows help and exits 0" {
+  setup_oknav_env
+  cd "$TEST_TEMP_DIR" || return 1
+  run ./oknav list -h
+  ((status == 0))
+  assert_output_contains "Usage: oknav list"
+}
+
+@test "oknav list --help shows help and exits 0" {
+  setup_oknav_env
+  cd "$TEST_TEMP_DIR" || return 1
+  run ./oknav list --help
+  ((status == 0))
+  assert_output_contains "Usage: oknav list"
+}
+
+@test "oknav list shows hosts.conf entries" {
+  setup_oknav_env ok0 ok1 ok2
+  cd "$TEST_TEMP_DIR" || return 1
+  # Point list to test directory
+  OKNAV_TARGET_DIR="$TEST_TEMP_DIR" run ./oknav list
+  ((status == 0))
+  assert_output_contains "ok0"
+  assert_output_contains "(hosts.conf)"
+}
+
+@test "oknav list shows ad-hoc entries" {
+  # Create environment with hosts.conf containing only ok0
+  create_server_symlinks "$TEST_TEMP_DIR" ok0 ok1 adhoc
+  create_hosts_conf "$TEST_TEMP_DIR" "ok0.test.local ok0 (oknav)"
+  cp "${PROJECT_DIR}/oknav" "${TEST_TEMP_DIR}/"
+  cd "$TEST_TEMP_DIR" || return 1
+
+  # ok1 and adhoc are symlinks but not in hosts.conf
+  OKNAV_TARGET_DIR="$TEST_TEMP_DIR" run ./oknav list
+  ((status == 0))
+  assert_output_contains "ok0"
+  assert_output_contains "(hosts.conf)"
+  assert_output_contains "ok1"
+  assert_output_contains "(ad-hoc)"
+  assert_output_contains "adhoc"
+}
+
+@test "oknav list excludes ok_master itself" {
+  setup_oknav_env ok0
+  cd "$TEST_TEMP_DIR" || return 1
+  OKNAV_TARGET_DIR="$TEST_TEMP_DIR" run ./oknav list
+  ((status == 0))
+  # ok_master should not appear in output
+  assert_output_not_contains "ok_master"
+}
+
+@test "oknav list with no symlinks produces no output" {
+  # Create environment with hosts.conf but no symlinks in target dir
+  mkdir -p "$TEST_TEMP_DIR/empty"
+  create_hosts_conf "$TEST_TEMP_DIR" "ok0.test.local ok0 (oknav)"
+  cp "${PROJECT_DIR}/oknav" "${TEST_TEMP_DIR}/"
+  cp "${PROJECT_DIR}/common.inc.sh" "${TEST_TEMP_DIR}/"
+  cd "$TEST_TEMP_DIR" || return 1
+
+  OKNAV_TARGET_DIR="$TEST_TEMP_DIR/empty" run ./oknav list
+  ((status == 0))
+  [[ -z "$output" ]]
+}
+
+@test "oknav list output is sorted" {
+  create_server_symlinks "$TEST_TEMP_DIR" zebra alpha middle
+  create_hosts_conf "$TEST_TEMP_DIR" \
+    "z.test.local zebra" \
+    "a.test.local alpha" \
+    "m.test.local middle"
+  cp "${PROJECT_DIR}/oknav" "${TEST_TEMP_DIR}/"
+  cd "$TEST_TEMP_DIR" || return 1
+
+  OKNAV_TARGET_DIR="$TEST_TEMP_DIR" run ./oknav list
+  ((status == 0))
+  # Output should be sorted: alpha, middle, zebra
+  # Check that alpha appears before zebra in output
+  [[ "$output" =~ alpha.*middle.*zebra ]]
+}
+
 #fin

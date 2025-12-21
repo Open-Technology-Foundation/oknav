@@ -10,6 +10,7 @@
 #   install      Create/manage symlinks in /usr/local/bin from hosts.conf
 #   add          Create ad-hoc host launcher (requires sudo)
 #   remove       Remove ad-hoc host launcher (requires sudo)
+#   list         List installed host symlinks and their source
 #
 # Exit codes:
 #   0   Success
@@ -79,6 +80,7 @@ Usage:
   $SCRIPT_NAME install [OPTIONS]            Manage symlinks from hosts.conf
   $SCRIPT_NAME add <hostname> [alias...]    Add ad-hoc launcher (sudo required)
   $SCRIPT_NAME remove <alias>...            Remove launcher (sudo required)
+  $SCRIPT_NAME list                         List installed host symlinks
 
 Options:
   -p, --parallel           Execute on all servers simultaneously
@@ -359,6 +361,59 @@ remove_host() {
   done
 }
 
+# ------------------------------------------------------------------------------
+# list_hosts() - List all host symlinks pointing to ok_master
+# Shows which hosts are defined in hosts.conf vs ad-hoc additions.
+# Args: [-h|--help]
+# Returns: 0 always
+# ------------------------------------------------------------------------------
+list_hosts() {
+  local -- target_dir=${OKNAV_TARGET_DIR:-/usr/local/bin}
+
+  # Locate ok_master: prefer installed location, fall back to dev directory
+  local -- ok_master=/usr/local/share/oknav/ok_master
+  [[ -f "$ok_master" ]] || ok_master="$SCRIPT_DIR"/ok_master
+
+  if [[ "${1:-}" == @(-h|--help) ]]; then
+    cat <<-'EOT'
+	Usage: oknav list
+
+	List all host symlinks in /usr/local/bin pointing to ok_master.
+	Shows whether each host is defined in hosts.conf or added ad-hoc.
+
+	Options:
+	  -h, --help    Show this help
+	EOT
+    return 0
+  fi
+
+  # Load hosts.conf for status checking
+  load_hosts_conf
+
+  # Find symlinks pointing to ok_master (match by target basename)
+  local -a aliases=()
+  local -- link name target
+
+  while IFS= read -r link; do
+    [[ -L "$link" ]] || continue
+    target=$(readlink "$link")
+    # Check if symlink target ends with ok_master
+    [[ "${target##*/}" == "ok_master" ]] || continue
+    name="${link##*/}"
+    [[ "$name" == "ok_master" ]] && continue
+    aliases+=("$name")
+  done < <(find "$target_dir" -maxdepth 1 -type l 2>/dev/null | sort)
+
+  # Display with status
+  for name in "${aliases[@]}"; do
+    if [[ -n "${ALIAS_TO_FQDN[$name]:-}" ]]; then
+      printf '%-12s (hosts.conf)\n' "$name"
+    else
+      printf '%-12s (ad-hoc)\n' "$name"
+    fi
+  done
+}
+
 # Parse command line arguments
 while (($#)); do
   case $1 in
@@ -407,6 +462,11 @@ case "${1:-}" in
   remove)
     shift
     remove_host "$@"
+    exit $?
+    ;;
+  list)
+    shift
+    list_hosts "$@"
     exit $?
     ;;
 esac
