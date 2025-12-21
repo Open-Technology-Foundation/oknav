@@ -57,7 +57,9 @@ designed for administrators with existing server access.
 
 Usage:
   $SCRIPT_NAME [OPTIONS] <command>          # Execute command on all servers
-  $SCRIPT_NAME install [OPTIONS]            # Manage symlinks in /usr/local/bin
+  $SCRIPT_NAME install [OPTIONS]            # Manage symlinks from hosts.conf
+  $SCRIPT_NAME add <hostname> [alias...]    # Add ad-hoc host launcher
+  $SCRIPT_NAME remove <alias>...            # Remove ad-hoc host launcher
   $SCRIPT_NAME [OPTIONS]                    # Show this help
 
 Options:
@@ -76,9 +78,11 @@ Examples:
   $SCRIPT_NAME -D hostname                  # Debug mode to see server discovery
   $SCRIPT_NAME -t 60 'apt update'           # Update with 60-second timeout
   $SCRIPT_NAME -pt 10 uptime                # Parallel with 10-second timeout
-  $SCRIPT_NAME install                      # Create symlinks in /usr/local/bin
+  $SCRIPT_NAME install                      # Create symlinks from hosts.conf
   $SCRIPT_NAME install --dry-run            # Show what install would do
-  $SCRIPT_NAME install --clean-local        # Also remove local symlinks
+  $SCRIPT_NAME add ai.okusi.id              # Add launcher for ai.okusi.id
+  $SCRIPT_NAME add ai.okusi.id ai ok-ai     # Add with custom aliases
+  $SCRIPT_NAME remove ai ok-ai              # Remove launchers
 
 Notes:
   - Commands are executed with sudo privileges
@@ -188,6 +192,142 @@ EOT
   return 0
 }
 
+# add_host() - Add ad-hoc host launcher symlinks
+# Usage: oknav add [-n] <hostname> [alias...]
+# Creates symlinks in /usr/local/bin pointing to ok_master
+add_host() {
+  local -i dry_run=0
+  local -- target_dir=/usr/local/bin
+
+  # Detect ok_master location: installed (/usr/local/share/oknav/) or dev ($SCRIPT_DIR)
+  local -- ok_master=/usr/local/share/oknav/ok_master
+  [[ -f "$ok_master" ]] || ok_master="$SCRIPT_DIR"/ok_master
+
+  # Parse options
+  while (($#)); do
+    case $1 in
+      -n|--dry-run) dry_run=1 ;;
+      -h|--help)
+        cat <<-'EOT'
+	Usage: oknav add [-n] <hostname> [alias...]
+
+	Create symlinks for quick SSH access to a host.
+
+	Arguments:
+	  hostname    FQDN or IP (must be resolvable)
+	  alias...    Symlink names (defaults to hostname if omitted)
+
+	Options:
+	  -n, --dry-run   Show what would be done without making changes
+	  -h, --help      Show this help
+
+	Examples:
+	  oknav add ai.okusi.id             # Creates: ai.okusi.id → ok_master
+	  oknav add ai.okusi.id ai ok-ai    # Creates: ai, ok-ai → ok_master
+	EOT
+        return 0 ;;
+      -*) error "Unknown option ${1@Q}"; return 22 ;;
+      *) break ;;
+    esac
+    shift
+  done
+
+  # Require hostname
+  (($#)) || { error "Usage: oknav add [-n] <hostname> [alias...]"; return 1; }
+
+  local -- hostname=$1; shift
+
+  # Validate hostname is resolvable
+  if ! getent hosts "$hostname" &>/dev/null; then
+    error "Cannot resolve hostname: $hostname"
+    return 1
+  fi
+
+  # Use hostname as alias if none provided
+  local -a aliases=("${@:-$hostname}")
+
+  ((dry_run)) && info "(dry-run mode - no changes will be made)"
+
+  # Create symlinks
+  local -- alias target
+  for alias in "${aliases[@]}"; do
+    target="$target_dir/$alias"
+    if [[ -L "$target" ]]; then
+      if [[ "$(readlink "$target")" == "$ok_master" ]]; then
+        info "skip: $alias (already exists)"
+      else
+        info "update: $alias (was: $(readlink "$target"))"
+        ((dry_run)) || ln -sf "$ok_master" "$target"
+      fi
+    elif [[ -e "$target" ]]; then
+      warn "$alias: file exists and is not a symlink - skipping"
+    else
+      info "create: $alias → $hostname"
+      ((dry_run)) || ln -sf "$ok_master" "$target"
+    fi
+  done
+}
+
+# remove_host() - Remove ad-hoc host launcher symlinks
+# Usage: oknav remove [-n] <alias>...
+# Removes symlinks from /usr/local/bin that point to ok_master
+remove_host() {
+  local -i dry_run=0
+  local -- target_dir=/usr/local/bin
+
+  # Detect ok_master for validation
+  local -- ok_master=/usr/local/share/oknav/ok_master
+  [[ -f "$ok_master" ]] || ok_master="$SCRIPT_DIR"/ok_master
+
+  # Parse options
+  while (($#)); do
+    case $1 in
+      -n|--dry-run) dry_run=1 ;;
+      -h|--help)
+        cat <<-'EOT'
+	Usage: oknav remove [-n] <alias>...
+
+	Remove symlinks created by 'oknav add'.
+
+	Options:
+	  -n, --dry-run   Show what would be done without making changes
+	  -h, --help      Show this help
+
+	Examples:
+	  oknav remove ai                   # Remove single symlink
+	  oknav remove ai ok-ai             # Remove multiple symlinks
+	EOT
+        return 0 ;;
+      -*) error "Unknown option ${1@Q}"; return 22 ;;
+      *) break ;;
+    esac
+    shift
+  done
+
+  # Require at least one alias
+  (($#)) || { error "Usage: oknav remove [-n] <alias>..."; return 1; }
+
+  ((dry_run)) && info "(dry-run mode - no changes will be made)"
+
+  # Remove symlinks
+  local -- alias target
+  for alias in "$@"; do
+    target="$target_dir/$alias"
+    if [[ -L "$target" ]]; then
+      if [[ "$(readlink "$target")" == "$ok_master" ]]; then
+        info "remove: $alias"
+        ((dry_run)) || rm -f "$target"
+      else
+        warn "$alias: symlink points elsewhere - skipping"
+      fi
+    elif [[ -e "$target" ]]; then
+      warn "$alias: not a symlink - skipping"
+    else
+      warn "$alias: does not exist"
+    fi
+  done
+}
+
 # Parse command line arguments
 while (($#)); do
   case $1 in
@@ -226,6 +366,16 @@ case "${1:-}" in
   install)
     shift
     install_symlinks "$@"
+    exit $?
+    ;;
+  add)
+    shift
+    add_host "$@"
+    exit $?
+    ;;
+  remove)
+    shift
+    remove_host "$@"
     exit $?
     ;;
 esac
