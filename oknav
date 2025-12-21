@@ -1,5 +1,23 @@
 #!/bin/bash
-# OKnav System - Multi-server SSH command orchestrator
+# ==============================================================================
+# OKnav System - Multi-server SSH Command Orchestrator
+# ==============================================================================
+# Executes commands across all cluster servers defined in hosts.conf.
+# Servers must have (oknav) option to be included in cluster operations.
+#
+# Subcommands:
+#   (default)    Execute command on all (oknav) servers
+#   install      Create/manage symlinks in /usr/local/bin from hosts.conf
+#   add          Create ad-hoc host launcher (requires sudo)
+#   remove       Remove ad-hoc host launcher (requires sudo)
+#
+# Exit codes:
+#   0   Success
+#   1   General error (no servers, missing config, etc.)
+#   22  Invalid option (EINVAL)
+#
+# See also: ok_master (individual server handler), common.inc.sh (shared lib)
+# ==============================================================================
 set -euo pipefail
 shopt -s inherit_errexit
 
@@ -11,103 +29,97 @@ readonly -- SCRIPT_PATH SCRIPT_DIR SCRIPT_NAME
 #shellcheck source=common.inc.sh
 source "$SCRIPT_DIR"/common.inc.sh || exit 1
 
-# Runtime configuration
-declare -i PARALLEL=0     # 0=sequential, 1=parallel execution
-declare -i TIMEOUT=30     # default timeout
-declare -a TEMP_FILES=()  # Track temp files for cleanup
-declare -a ok_server_excludes=()  # Servers to exclude from execution
+# ------------------------------------------------------------------------------
+# Runtime Configuration
+# ------------------------------------------------------------------------------
+declare -i PARALLEL=0              # Execution mode: 0=sequential, 1=parallel
+declare -i TIMEOUT=30              # SSH connection timeout in seconds
+declare -a TEMP_FILES=()           # Temp files to clean up on exit
+declare -a ok_server_excludes=()   # Servers excluded via -x option
 
-# Variables used throughout the script
-declare -i exit_code               # SSH/timeout exit code
-declare -- server                  # Current server being processed
-declare -- pid                     # Process ID for parallel execution
-declare -- temp_file               # Temporary file for output
-declare -- temp_file_path          # Path to temp file reference
+# Working variables (declared here to satisfy strict mode)
+declare -i exit_code               # Captured exit code from ssh/timeout
+declare -- server                  # Current server alias being processed
+declare -- pid                     # Background process ID (parallel mode)
+declare -- temp_file               # Path to server output temp file
+declare -- temp_file_path          # Path to temp file reference marker
 
-# Cleanup function - removes all temporary files
+# ------------------------------------------------------------------------------
+# cleanup() - Remove temporary files and exit
 # Args: [exit_code] - Exit code to preserve (default: 0)
+# Called by: trap on SIGINT, SIGTERM, EXIT
+# ------------------------------------------------------------------------------
 cleanup() {
   local -i exitcode=${1:-0}
-  # Disable trap to prevent recursion
-  trap - SIGINT SIGTERM EXIT
+  trap - SIGINT SIGTERM EXIT  # Prevent recursion
   # Remove tracked temp files
   local -- file
   for file in "${TEMP_FILES[@]}"; do
     [[ -f "$file" ]] && rm -f "$file"
   done
-  # Remove any leftover temp files (parallel mode runs in subshells, so TEMP_FILES array isn't updated)
+  # Remove orphaned temp files (parallel subshells don't update TEMP_FILES)
   rm -f "${TEMP_DIR:-/tmp}"/"${SCRIPT_NAME:-}"_*_* 2>/dev/null || true
   rm -f "${TEMP_DIR:-/tmp}"/."${SCRIPT_NAME:-}"_*_tempfile 2>/dev/null || true
   exit "$exitcode"
 }
-# Set up cleanup trap
 trap 'cleanup $?' SIGINT SIGTERM EXIT
 
-# Usage help function
+# ------------------------------------------------------------------------------
+# usage() - Display help message
+# ------------------------------------------------------------------------------
 usage() {
   cat <<EOT
 $SCRIPT_NAME $VERSION - Multi-server SSH command orchestrator
 
-Orchestrates command execution across all cluster servers.
-Supports both sequential (default) and parallel execution modes. Servers
-are discovered from hosts.conf entries marked with (oknav) option.
-
-Security Note: Commands are executed with sudo privileges. This tool is
-designed for administrators with existing server access.
+Execute commands across all cluster servers. Servers are discovered from
+hosts.conf entries marked with (oknav) option.
 
 Usage:
-  $SCRIPT_NAME [OPTIONS] <command>          # Execute command on all servers
-  $SCRIPT_NAME install [OPTIONS]            # Manage symlinks from hosts.conf
-  $SCRIPT_NAME add <hostname> [alias...]    # Add ad-hoc host launcher
-  $SCRIPT_NAME remove <alias>...            # Remove ad-hoc host launcher
-  $SCRIPT_NAME [OPTIONS]                    # Show this help
+  $SCRIPT_NAME [OPTIONS] <command>          Execute command on all servers
+  $SCRIPT_NAME install [OPTIONS]            Manage symlinks from hosts.conf
+  $SCRIPT_NAME add <hostname> [alias...]    Add ad-hoc launcher (sudo required)
+  $SCRIPT_NAME remove <alias>...            Remove launcher (sudo required)
 
 Options:
-  -p, --parallel         Execute commands in parallel across all servers
-  -t, --timeout SECS     Set connection timeout in seconds (default: $TIMEOUT)
-  -x, --exclude-host HOST  Exclude specific host from this execution (repeatable)
-  -D, --debug            Enable debug output
-  -h, --help             Display this help message
-  -V, --version          Display version information
+  -p, --parallel           Execute on all servers simultaneously
+  -t, --timeout SECS       Connection timeout (default: $TIMEOUT)
+  -x, --exclude-host HOST  Exclude host from this run (repeatable)
+  -D, --debug              Show server discovery and execution details
+  -V, --version            Show version
+  -h, --help               Show this help
+
+Server Filtering (automatic):
+  (oknav)            Required for inclusion in cluster operations
+  (exclude)          Excluded from cluster (can still access directly)
+  (local-only:HOST)  Only accessible from specified host
 
 Examples:
-  $SCRIPT_NAME uptime                       # Check uptime on all servers (sequential)
-  $SCRIPT_NAME -p 'df -h'                   # Check disk space in parallel
-  $SCRIPT_NAME -p 'systemctl status nginx'  # Check nginx status on all servers
-  $SCRIPT_NAME -x ok0 uptime                # Exclude ok0 from this run
-  $SCRIPT_NAME -D hostname                  # Debug mode to see server discovery
-  $SCRIPT_NAME -t 60 'apt update'           # Update with 60-second timeout
-  $SCRIPT_NAME -pt 10 uptime                # Parallel with 10-second timeout
-  $SCRIPT_NAME install                      # Create symlinks from hosts.conf
-  $SCRIPT_NAME install --dry-run            # Show what install would do
-  $SCRIPT_NAME add ai.okusi.id              # Add launcher for ai.okusi.id
-  $SCRIPT_NAME add ai.okusi.id ai ok-ai     # Add with custom aliases
-  $SCRIPT_NAME remove ai ok-ai              # Remove launchers
-
-Notes:
-  - Commands are executed with sudo privileges
-  - Servers are discovered from hosts.conf entries with (oknav) option
-  - Servers with (exclude) option are excluded by default
-  - Servers with (local-only:HOST) are excluded unless running from HOST
-  - Use quotes for commands with special characters
-  - Parallel mode creates temporary files in $TEMP_DIR
-  - Connection timeout is $TIMEOUT seconds for unreachable servers
+  $SCRIPT_NAME uptime                       Sequential execution (default)
+  $SCRIPT_NAME -p 'df -h'                   Parallel execution
+  $SCRIPT_NAME -x ok0 -x ok1 uptime         Exclude multiple hosts
+  $SCRIPT_NAME -pt 10 uptime                Parallel + 10s timeout
+  $SCRIPT_NAME install --dry-run            Preview symlink changes
+  $SCRIPT_NAME add ai.okusi.id ai           Create 'ai' launcher for ai.okusi.id
+  $SCRIPT_NAME remove ai                    Remove 'ai' launcher
 
 EOT
 }
 
+# ------------------------------------------------------------------------------
 # install_symlinks() - Create/manage symlinks in /usr/local/bin
-# Options: --dry-run, --remove-stale, --clean-local
+# Creates symlinks for all aliases defined in hosts.conf, pointing to ok_master.
+# Options: -n/--dry-run, --remove-stale, --clean-local
+# Returns: 0 on success, 22 on invalid option
+# ------------------------------------------------------------------------------
 install_symlinks() {
   local -i dry_run=0 remove_stale=0 clean_local=0
   local -- target_dir=/usr/local/bin
   local -i created=0 updated=0 skipped=0 removed=0
 
-  # Detect ok_master location: installed (/usr/local/share/oknav/) or dev ($SCRIPT_DIR)
+  # Locate ok_master: prefer installed location, fall back to dev directory
   local -- ok_master=/usr/local/share/oknav/ok_master
   [[ -f "$ok_master" ]] || ok_master="$SCRIPT_DIR"/ok_master
 
-  # Parse install options
   while (($#)); do
     case $1 in
       -n|--dry-run) dry_run=1 ;;
@@ -115,15 +127,16 @@ install_symlinks() {
       --clean-local) clean_local=1 ;;
       -h|--help)
           cat <<-EOT
-Usage: $SCRIPT_NAME install [OPTIONS]
-Manage symlinks in /usr/local/bin for all hosts.conf aliases
+	Usage: $SCRIPT_NAME install [OPTIONS]
 
-Options:
-  -n, --dry-run      Show what would be done without making changes
-  --remove-stale     Remove symlinks not in hosts.conf
-  --clean-local      Remove local symlinks from $SCRIPT_DIR
-  -h, --help         Show this help
-EOT
+	Create symlinks in /usr/local/bin for all hosts.conf aliases.
+
+	Options:
+	  -n, --dry-run      Preview changes without modifying filesystem
+	  --remove-stale     Remove symlinks not in hosts.conf
+	  --clean-local      Remove dev symlinks from script directory
+	  -h, --help         Show this help
+	EOT
         return 0
         ;;
       *)
@@ -192,18 +205,21 @@ EOT
   return 0
 }
 
-# add_host() - Add ad-hoc host launcher symlinks
-# Usage: oknav add [-n] <hostname> [alias...]
-# Creates symlinks in /usr/local/bin pointing to ok_master
+# ------------------------------------------------------------------------------
+# add_host() - Create ad-hoc host launcher symlinks
+# Creates symlinks in /usr/local/bin → ok_master for quick SSH access.
+# Hostname must be resolvable via DNS/hosts. Requires sudo.
+# Args: [-n] <hostname> [alias...]
+# Returns: 0 success, 1 error (unresolvable host), 22 invalid option
+# ------------------------------------------------------------------------------
 add_host() {
   local -i dry_run=0
   local -- target_dir=/usr/local/bin
 
-  # Detect ok_master location: installed (/usr/local/share/oknav/) or dev ($SCRIPT_DIR)
+  # Locate ok_master: prefer installed location, fall back to dev directory
   local -- ok_master=/usr/local/share/oknav/ok_master
   [[ -f "$ok_master" ]] || ok_master="$SCRIPT_DIR"/ok_master
 
-  # Parse options
   while (($#)); do
     case $1 in
       -n|--dry-run) dry_run=1 ;;
@@ -211,19 +227,22 @@ add_host() {
         cat <<-'EOT'
 	Usage: oknav add [-n] <hostname> [alias...]
 
-	Create symlinks for quick SSH access to a host.
+	Create symlinks for quick SSH access to a host (requires sudo).
+	The hostname must be resolvable via DNS or /etc/hosts.
 
 	Arguments:
-	  hostname    FQDN or IP (must be resolvable)
+	  hostname    FQDN or IP address (must be resolvable)
 	  alias...    Symlink names (defaults to hostname if omitted)
 
 	Options:
-	  -n, --dry-run   Show what would be done without making changes
+	  -n, --dry-run   Preview changes without modifying filesystem
 	  -h, --help      Show this help
 
 	Examples:
-	  oknav add ai.okusi.id             # Creates: ai.okusi.id → ok_master
-	  oknav add ai.okusi.id ai ok-ai    # Creates: ai, ok-ai → ok_master
+	  oknav add ai.okusi.id             Creates: ai.okusi.id → ok_master
+	  oknav add ai.okusi.id ai ok-ai    Creates: ai, ok-ai → ok_master
+
+	Note: Symlinks are created in /usr/local/bin using sudo.
 	EOT
         return 0 ;;
       -*) error "Unknown option ${1@Q}"; return 22 ;;
@@ -274,18 +293,21 @@ add_host() {
   done
 }
 
+# ------------------------------------------------------------------------------
 # remove_host() - Remove ad-hoc host launcher symlinks
-# Usage: oknav remove [-n] <alias>...
-# Removes symlinks from /usr/local/bin that point to ok_master
+# Removes symlinks from /usr/local/bin that point to ok_master. Requires sudo.
+# Only removes symlinks pointing to ok_master; ignores other files.
+# Args: [-n] <alias>...
+# Returns: 0 always (warnings for non-existent/non-symlink files)
+# ------------------------------------------------------------------------------
 remove_host() {
   local -i dry_run=0
   local -- target_dir=/usr/local/bin
 
-  # Detect ok_master for validation
+  # Locate ok_master for symlink validation
   local -- ok_master=/usr/local/share/oknav/ok_master
   [[ -f "$ok_master" ]] || ok_master="$SCRIPT_DIR"/ok_master
 
-  # Parse options
   while (($#)); do
     case $1 in
       -n|--dry-run) dry_run=1 ;;
@@ -293,15 +315,18 @@ remove_host() {
         cat <<-'EOT'
 	Usage: oknav remove [-n] <alias>...
 
-	Remove symlinks created by 'oknav add'.
+	Remove symlinks created by 'oknav add' (requires sudo).
+	Only removes symlinks that point to ok_master.
 
 	Options:
-	  -n, --dry-run   Show what would be done without making changes
+	  -n, --dry-run   Preview changes without modifying filesystem
 	  -h, --help      Show this help
 
 	Examples:
-	  oknav remove ai                   # Remove single symlink
-	  oknav remove ai ok-ai             # Remove multiple symlinks
+	  oknav remove ai                   Remove single symlink
+	  oknav remove ai ok-ai             Remove multiple symlinks
+
+	Note: Symlinks are removed from /usr/local/bin using sudo.
 	EOT
         return 0 ;;
       -*) error "Unknown option ${1@Q}"; return 22 ;;
@@ -434,110 +459,98 @@ if ((DEBUG)); then
   debug "Temp directory: $TEMP_DIR"
 fi
 
-# Execute command on a single server (used in parallel mode)
-# Creates a temporary file to capture output for later display
-# Args: server_name command [args...]
-# Returns: 0 on success, 1 on temp file creation failure
+# ------------------------------------------------------------------------------
+# run_command() - Execute command on single server (parallel mode helper)
+# Captures output to temp file for ordered display after all complete.
+# Args: server command [args...]
+# Returns: 0 success, 1 temp file creation failed
+# Timeout exit codes: 124=timeout, 125=timeout error, 126=command not found
+# ------------------------------------------------------------------------------
 run_command() {
   local -- server=$1
   local -- temp_file
   shift
-  
-  # Create secure temporary file
+
   temp_file=$(mktemp "$TEMP_DIR"/"$SCRIPT_NAME"_"$server"_XXXXXX) || {
     error "Cannot create temporary file for ${server@Q}"
     return 1
   }
-  
-  # Track temp file for cleanup
   TEMP_FILES+=("$temp_file")
-  
-  # Execute and capture output
+
+  # Capture all output (stdout + stderr) to temp file
   { echo "+++$server:"
-    # Execute command via sudo with timeout protection
-    # timeout exit codes: 124=timeout reached, 125=timeout error, 126=command not found
     timeout "$TIMEOUT"s sudo "$server" "$@" || {
       exit_code=$?
-      if ((exit_code == 124 )); then
-        echo "Connection timeout after $TIMEOUT seconds"
-      elif ((exit_code == 125 )); then
-        echo 'Timeout command error'
-      elif ((exit_code == 126 )); then
-        echo "Command not found: $server"
-      fi
-      true  # Continue execution regardless of error
+      case $exit_code in
+        124) echo "Connection timeout after $TIMEOUT seconds" ;;
+        125) echo 'Timeout command error' ;;
+        126) echo "Command not found: $server" ;;
+      esac
+      true  # Continue regardless of error
     }
     echo
   } &> "$temp_file"
-  
-  # Store temp file path reference for collection phase
+
+  # Write reference file for output collection phase
   echo "$temp_file" > "$TEMP_DIR"/."$SCRIPT_NAME"_"$server"_tempfile
-  
-  # Track reference file for cleanup
   TEMP_FILES+=("$TEMP_DIR"/."$SCRIPT_NAME"_"$server"_tempfile)
 }
 
-# Main execution logic
+# ==============================================================================
+# Main Execution
+# ==============================================================================
 declare -i first=0
 
 if (( PARALLEL )); then
-  # PARALLEL MODE: Execute commands on all servers simultaneously
+  # --------------------------------------------------------------------------
+  # PARALLEL MODE: All servers execute simultaneously, output collected after
+  # --------------------------------------------------------------------------
   declare -a pids=()
-  declare -- pid
 
-  # Start background processes for each server
   for server in "${SERVERS[@]}"; do
     run_command "$server" "$@" &
-    pids+=($!)  # Store process ID for later waiting
+    pids+=($!)
   done
 
-  # Wait for all background processes to complete
+  # Wait for all background processes
   for pid in "${pids[@]}"; do
-    wait "$pid" || true  # Ignore exit status of individual servers
+    wait "$pid" || true
   done
 
-  # Collect and display outputs in server order
+  # Display outputs in server order (not completion order)
   for server in "${SERVERS[@]}"; do
     temp_file_path="$TEMP_DIR"/."$SCRIPT_NAME"_"$server"_tempfile
-    
-    # Find the temp file for this server
     if [[ -f "$temp_file_path" ]]; then
       temp_file=$(<"$temp_file_path")
-      
       if [[ -f "$temp_file" ]]; then
-        ((first)) && echo || first=1  # Add separator between outputs
+        ((first)) && echo || first=1
         cat "$temp_file"
       else
         warn "Output file for ${server@Q} not found"
       fi
-      
-      # Clean up temp file reference
       rm -f "$temp_file_path"
     fi
   done
 else
-  # SEQUENTIAL MODE: Execute commands on servers one by one
+  # --------------------------------------------------------------------------
+  # SEQUENTIAL MODE: Execute on each server in order, display immediately
+  # --------------------------------------------------------------------------
   for server in "${SERVERS[@]}"; do
-    ((first)) && echo || first=1  # Add separator between outputs
+    ((first)) && echo || first=1
     echo "+++$server:"
-    
-    # Execute command via sudo with timeout protection
     timeout "$TIMEOUT"s sudo "$server" "$@" || {
       exit_code=$?
-      if (( exit_code == 124 )); then
-        echo "Connection timeout after $TIMEOUT seconds"
-      elif (( exit_code == 125 )); then
-        echo 'Timeout command error'
-      elif (( exit_code == 126 )); then
-        echo "Command not found ${server@Q}"
-      fi
-      true  # Continue execution regardless of error
+      case $exit_code in
+        124) echo "Connection timeout after $TIMEOUT seconds" ;;
+        125) echo 'Timeout command error' ;;
+        126) echo "Command not found ${server@Q}" ;;
+      esac
+      true  # Continue regardless of error
     }
     echo
   done
 fi
 
-# Debug completion message
 debug "Execution completed for ${#SERVERS[@]} servers"
 
 # vim: set ts=2 sw=2 et:
