@@ -20,7 +20,7 @@ oknav \- SSH orchestration system for multi-server command execution
 .RI [ OPTIONS ]
 .br
 .B oknav list
-.RI [ \-R ]
+.RI [ \-R "] [" \-p ]
 .br
 .B oknav add
 .RI [ \-n ]
@@ -203,6 +203,11 @@ Display remove help and exit.
 .BR \-R ", " \-\-reachable
 Test each host for SSH connectivity. Uses a 5-second timeout per host.
 Displays a checkmark or cross symbol indicating connectivity status.
+.TP
+.BR \-p ", " \-\-parallel
+Test hosts in parallel. Use with
+.B \-R
+for faster results when checking many hosts.
 .TP
 .BR \-h ", " \-\-help
 Display list help and exit.
@@ -454,6 +459,9 @@ List all installed host symlinks with their source (hosts.conf or ad-hoc).
 .TP
 .B oknav list \-\-reachable
 List hosts and test SSH connectivity (5-second timeout per host).
+.TP
+.B oknav list \-R \-p
+Test connectivity in parallel for faster results.
 .\"
 .SS Bypassing Subcommands
 Use
