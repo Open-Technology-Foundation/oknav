@@ -449,4 +449,156 @@ EOF
   assert_mock_called "SUDO_CALL" "echo"
 }
 
+# ==============================================================================
+# Add Subcommand Tests
+# ==============================================================================
+
+# Helper to create mock getent for hostname resolution
+create_mock_getent() {
+  local resolvable="${1:-}"  # comma-separated list of resolvable hostnames
+
+  cat > "${MOCK_BIN}/getent" <<EOF
+#!/bin/bash
+# Mock getent: returns success for specified hostnames
+hostname="\$2"
+resolvable="${resolvable}"
+
+if [[ ",\${resolvable}," == *",\${hostname},"* ]]; then
+  echo "127.0.0.1 \${hostname}"
+  exit 0
+else
+  exit 2
+fi
+EOF
+  chmod +x "${MOCK_BIN}/getent"
+}
+
+@test "oknav add -h shows help and exits 0" {
+  setup_oknav_env
+  cd "$TEST_TEMP_DIR" || return 1
+  run ./oknav add -h
+  ((status == 0))
+  assert_output_contains "Usage: oknav add"
+  assert_output_contains "hostname"
+}
+
+@test "oknav add --help shows help and exits 0" {
+  setup_oknav_env
+  cd "$TEST_TEMP_DIR" || return 1
+  run ./oknav add --help
+  ((status == 0))
+  assert_output_contains "Usage: oknav add"
+}
+
+@test "oknav add without hostname shows error and exits 1" {
+  setup_oknav_env
+  cd "$TEST_TEMP_DIR" || return 1
+  run ./oknav add
+  ((status == 1))
+  assert_output_contains "Usage: oknav add"
+}
+
+@test "oknav add with unresolvable hostname exits 1" {
+  setup_oknav_env
+  create_mock_getent ""  # No resolvable hostnames
+  cd "$TEST_TEMP_DIR" || return 1
+  run ./oknav add nonexistent.invalid
+  ((status == 1))
+  assert_output_contains "Cannot resolve hostname"
+}
+
+@test "oknav add -n dry-run shows what would be done" {
+  setup_oknav_env
+  create_mock_getent "test.example.com"
+  cd "$TEST_TEMP_DIR" || return 1
+  run ./oknav add -n test.example.com
+  ((status == 0))
+  assert_output_contains "dry-run"
+  assert_output_contains "create:"
+  # Symlink should NOT be created in dry-run
+  [[ ! -L "/usr/local/bin/test.example.com" ]]
+}
+
+@test "oknav add with aliases creates multiple symlinks" {
+  setup_oknav_env
+  create_mock_getent "test.example.com"
+  # Use TEST_TEMP_DIR as target (can't write to /usr/local/bin in tests)
+  # We'll check the output messages instead
+  cd "$TEST_TEMP_DIR" || return 1
+  run ./oknav add -n test.example.com testalias ok-test
+  ((status == 0))
+  assert_output_contains "testalias"
+  assert_output_contains "ok-test"
+}
+
+@test "oknav add invalid option exits 22" {
+  setup_oknav_env
+  cd "$TEST_TEMP_DIR" || return 1
+  run ./oknav add --invalid
+  ((status == 22))
+  assert_output_contains "Unknown option"
+}
+
+# ==============================================================================
+# Remove Subcommand Tests
+# ==============================================================================
+
+@test "oknav remove -h shows help and exits 0" {
+  setup_oknav_env
+  cd "$TEST_TEMP_DIR" || return 1
+  run ./oknav remove -h
+  ((status == 0))
+  assert_output_contains "Usage: oknav remove"
+}
+
+@test "oknav remove --help shows help and exits 0" {
+  setup_oknav_env
+  cd "$TEST_TEMP_DIR" || return 1
+  run ./oknav remove --help
+  ((status == 0))
+  assert_output_contains "Usage: oknav remove"
+}
+
+@test "oknav remove without alias shows error and exits 1" {
+  setup_oknav_env
+  cd "$TEST_TEMP_DIR" || return 1
+  run ./oknav remove
+  ((status == 1))
+  assert_output_contains "Usage: oknav remove"
+}
+
+@test "oknav remove -n dry-run shows what would be done" {
+  setup_oknav_env ok0 ok1
+  cd "$TEST_TEMP_DIR" || return 1
+  # Test against existing symlinks created by setup
+  run ./oknav remove -n ok0
+  ((status == 0))
+  assert_output_contains "dry-run"
+}
+
+@test "oknav remove warns on non-existent alias" {
+  setup_oknav_env
+  cd "$TEST_TEMP_DIR" || return 1
+  run ./oknav remove nonexistent-alias
+  # Should warn but not fail
+  assert_output_contains "does not exist"
+}
+
+@test "oknav remove invalid option exits 22" {
+  setup_oknav_env
+  cd "$TEST_TEMP_DIR" || return 1
+  run ./oknav remove --invalid
+  ((status == 22))
+  assert_output_contains "Unknown option"
+}
+
+@test "oknav remove multiple aliases processes all" {
+  setup_oknav_env
+  cd "$TEST_TEMP_DIR" || return 1
+  run ./oknav remove -n nonexistent1 nonexistent2
+  # Should process both
+  assert_output_contains "nonexistent1"
+  assert_output_contains "nonexistent2"
+}
+
 #fin
