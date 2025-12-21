@@ -248,22 +248,28 @@ add_host() {
 
   ((dry_run)) && info "(dry-run mode - no changes will be made)"
 
-  # Create symlinks
-  local -- alias target
+  # Create symlinks (requires sudo for /usr/local/bin)
+  local -- alias target reply
   for alias in "${aliases[@]}"; do
     target="$target_dir/$alias"
     if [[ -L "$target" ]]; then
       if [[ "$(readlink "$target")" == "$ok_master" ]]; then
-        info "skip: $alias (already exists)"
+        info "skip: $alias (already points to ok_master)"
       else
+        # Symlink exists but points elsewhere
+        if [[ -t 0 && -t 1 ]]; then
+          # Interactive: prompt user
+          read -rp "oknav: $alias exists (→ $(readlink "$target")). Overwrite? [y/N] " reply
+          [[ "$reply" =~ ^[Yy] ]] || { info "skip: $alias"; continue; }
+        fi
         info "update: $alias (was: $(readlink "$target"))"
-        ((dry_run)) || ln -sf "$ok_master" "$target"
+        ((dry_run)) || sudo ln -sf "$ok_master" "$target"
       fi
     elif [[ -e "$target" ]]; then
       warn "$alias: file exists and is not a symlink - skipping"
     else
       info "create: $alias → $hostname"
-      ((dry_run)) || ln -sf "$ok_master" "$target"
+      ((dry_run)) || sudo ln -sf "$ok_master" "$target"
     fi
   done
 }
@@ -309,14 +315,14 @@ remove_host() {
 
   ((dry_run)) && info "(dry-run mode - no changes will be made)"
 
-  # Remove symlinks
+  # Remove symlinks (requires sudo for /usr/local/bin)
   local -- alias target
   for alias in "$@"; do
     target="$target_dir/$alias"
     if [[ -L "$target" ]]; then
       if [[ "$(readlink "$target")" == "$ok_master" ]]; then
         info "remove: $alias"
-        ((dry_run)) || rm -f "$target"
+        ((dry_run)) || sudo rm -f "$target"
       else
         warn "$alias: symlink points elsewhere - skipping"
       fi
