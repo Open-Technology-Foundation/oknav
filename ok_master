@@ -15,9 +15,9 @@
 # See also: oknav (cluster orchestrator), common.inc.sh (shared lib)
 # ==============================================================================
 set -euo pipefail
-shopt -s inherit_errexit
+shopt -s inherit_errexit shift_verbose extglob nullglob
 
-SCRIPT_PATH=$(readlink -en -- "$0")
+SCRIPT_PATH=$(realpath -- "$0")
 SCRIPT_DIR=${SCRIPT_PATH%/*}
 SCRIPT_NAME=${SCRIPT_PATH##*/}
 readonly -- SCRIPT_PATH SCRIPT_DIR SCRIPT_NAME
@@ -72,18 +72,20 @@ EOT
 # ------------------------------------------------------------------------------
 while (($#)); do
   case $1 in
-    -u|--user)  shift; USER="${1:-$USER}" ;;
-    -r|--root)  USER=root ;;
-    -d|--dir)   CURDIR="$PWD" ;;
-    -D|--debug) DEBUG=1 ;;
+    -u|--user)    shift; USER=${1:-"${USER:-}"} ;;
+    -r|--root)    USER=root ;;
+    -d|--dir)     CURDIR=$PWD ;;
+    -D|--debug)   DEBUG=1 ;;
     -V|--version) echo "$SCRIPT_NAME $VERSION"; exit 0 ;;
-    -h|--help) usage; exit 0 ;;
+    -h|--help)    usage; exit 0 ;;
+
     -[urdDVh]*)
-      # Expand combined options: -rd → -r -d
-      #shellcheck disable=SC2046
-      set -- '' $(printf -- '-%c ' $(grep -o . <<<"${1:1}")) "${@:2}" ;;
-    -*) die 22 "Invalid option ${1@Q}" ;;
-    *)  CMD="$*"; break ;;  # Remaining args form the remote command
+                  # Expand combined options: -rd → -r -d
+                  #shellcheck disable=SC2046
+                  set -- '' $(printf -- '-%c ' $(grep -o . <<<"${1:1}")) "${@:2}" ;;
+
+    -*)           die 22 "Invalid option ${1@Q}" ;;
+    *)            CMD="$*"; break ;;  # Remaining args form the remote command
   esac
   shift
 done
