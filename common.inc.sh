@@ -39,7 +39,7 @@ set -eu
 shopt -s inherit_errexit
 
 # Global configuration
-declare -r VERSION='2.3.0'
+declare -r VERSION=2.3.0
 
 # Set up runtime directory for temporary files
 # Prefers XDG_RUNTIME_DIR (typically /run/user/UID), falls back to /tmp
@@ -81,12 +81,12 @@ _msg() {
   for msg in "$@"; do printf '%s %s\n' "$prefix" "$msg"; done
 }
 
-vecho()   { ((VERBOSE)) || return 0; _msg "$@"; }           # Verbose echo (stdout)
-info()    { ((VERBOSE)) || return 0; >&2 _msg "$@"; }       # Info message (stderr)
-warn()    { ((VERBOSE)) || return 0; >&2 _msg "$@"; }       # Warning (stderr)
-success() { ((VERBOSE)) || return 0; >&2 _msg "$@"; }       # Success (stderr)
-debug()   { ((DEBUG)) || return 0; >&2 _msg "$@"; }         # Debug (stderr, if DEBUG=1)
-error()   { >&2 _msg "$@"; }                                # Error (always, stderr)
+vecho()   { ((VERBOSE)) || return 0; _msg "$@"; }     # Verbose echo (stdout)
+info()    { ((VERBOSE)) || return 0; >&2 _msg "$@"; } # Info message (stderr)
+warn()    { ((VERBOSE)) || return 0; >&2 _msg "$@"; } # Warning (stderr)
+success() { ((VERBOSE)) || return 0; >&2 _msg "$@"; } # Success (stderr)
+debug()   { ((DEBUG)) || return 0; >&2 _msg "$@"; }   # Debug (stderr, if DEBUG=1)
+error()   { >&2 _msg "$@"; }                          # Error (always, stderr)
 
 # die() - Print error and exit
 # Args: exit_code [message...]
@@ -214,7 +214,7 @@ load_hosts_conf() {
 # Returns: 0 success, 1 not found, 2 local-only constraint violated
 # ------------------------------------------------------------------------------
 resolve_alias() {
-  local -- alias="$1"
+  local -- alias=$1
   local -- fqdn options required_host
   local -- local_only_re='local-only:([^,)]+)'
 
@@ -240,7 +240,7 @@ resolve_alias() {
 # Returns: 0 if excluded, 1 if not
 # ------------------------------------------------------------------------------
 is_excluded() {
-  local -- alias="$1"
+  local -- alias=$1
   [[ "${ALIAS_OPTIONS[$alias]:-}" == *exclude* ]]
 }
 
@@ -250,7 +250,7 @@ is_excluded() {
 # Note: Secondary aliases for same FQDN return 1 even with (oknav)
 # ------------------------------------------------------------------------------
 is_oknav() {
-  local -- alias="$1"
+  local -- alias=$1
   local -- options="${ALIAS_OPTIONS[$alias]:-}"
   local -- fqdn="${ALIAS_TO_FQDN[$alias]:-}"
   [[ "$options" == *oknav* ]] || return 1
@@ -263,7 +263,7 @@ is_oknav() {
 # Returns: 0 always
 # ------------------------------------------------------------------------------
 get_local_only_host() {
-  local -- alias="$1"
+  local -- alias=$1
   local -- options="${ALIAS_OPTIONS[$alias]:-}"
   local -- local_only_re='local-only:([^,)]+)'
   if [[ "$options" =~ $local_only_re ]]; then
