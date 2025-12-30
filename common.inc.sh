@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # ==============================================================================
 # OKnav System - Common Include File
 # ==============================================================================
@@ -91,7 +91,7 @@ error()   { >&2 _msg "$@"; }                                # Error (always, std
 # die() - Print error and exit
 # Args: exit_code [message...]
 # Default exit code: 1
-die() { (($# > 1)) && error "${@:2}"; exit "${1:-1}"; }
+die() { (($# > 1)) && error "${@:2}" ||:; exit "${1:-1}"; }
 
 
 # ------------------------------------------------------------------------------
@@ -143,8 +143,8 @@ find_hosts_conf() {
     return 0
   fi
   local -- config
-  for config in "/etc/oknav/hosts.conf" "${SCRIPT_DIR:-$(dirname "$0")}/hosts.conf"; do
-    [[ -f "$config" ]] && { echo "$config"; return 0; }
+  for config in /etc/oknav/hosts.conf "${SCRIPT_DIR:-$(dirname "$0")}/hosts.conf"; do
+    [[ -f "$config" ]] && { echo "$config"; return 0; } ||:
   done
   return 1
 }
@@ -162,7 +162,7 @@ load_hosts_conf() {
 
   # Auto-detect hosts.conf if not provided
   if [[ -z "$hosts_file" ]]; then
-    hosts_file=$(find_hosts_conf) || die 1 "hosts.conf not found in /etc/oknav/ or script directory"
+    hosts_file=$(find_hosts_conf) || die 1 'hosts.conf not found in /etc/oknav/ or script directory'
   fi
 
   # Clear previous data
@@ -171,7 +171,7 @@ load_hosts_conf() {
   ALIAS_LIST=()
   FQDN_PRIMARY_ALIAS=()
 
-  [[ -f "$hosts_file" ]] || die 1 "hosts.conf not found: ${hosts_file@Q}"
+  [[ -f "$hosts_file" ]] || die 1 "hosts.conf not found ${hosts_file@Q}"
 
   while IFS= read -r line || [[ -n "$line" ]]; do
     # Skip empty lines and comments
@@ -227,7 +227,7 @@ resolve_alias() {
   if [[ "$options" =~ $local_only_re ]]; then
     required_host="${BASH_REMATCH[1]}"
     if [[ "$HOSTNAME" != "$required_host" ]]; then
-      error "$alias: restricted to host ${required_host@Q} (current: $HOSTNAME)"
+      error "$alias: restricted to host ${required_host@Q} (current: ${HOSTNAME@Q})"
       return 2
     fi
   fi
