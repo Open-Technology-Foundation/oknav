@@ -1,5 +1,5 @@
 .\" OKnav System Manual Page
-.\" Generated: 2025-12-22
+.\" Generated: 2025-12-30
 .\"
 .TH OKNAV 1 "December 2025" "OKnav 2.3.0" "User Commands"
 .\"
@@ -315,6 +315,10 @@ restricted to a specific host and the current hostname does not match.
 .TP
 .B 22
 Invalid command-line option (EINVAL).
+.TP
+.B 42
+Direct ok_master execution. The ok_master script must be invoked
+via a symlink (e.g., srv1), not directly as ok_master.
 .TP
 .B 124
 Connection timeout reached.
