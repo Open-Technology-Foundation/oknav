@@ -67,7 +67,7 @@ _oknav_completion() {
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-    opts="-p --parallel -t --timeout -x --exclude-host -D --debug -h --help -V --version"
+    opts="-p --parallel -d --dir -t --timeout -x --exclude-host -D --debug -h --help -V --version"
     subcommands="install add remove list"
 
     case "$prev" in
