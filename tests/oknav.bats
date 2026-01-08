@@ -6,7 +6,7 @@
 #
 # Key behaviors tested:
 #   - Server discovery from symlinks validated against hosts.conf
-#   - Option parsing (-p, -t, -x, -D)
+#   - Option parsing (-p, -d, -t, -x, -D)
 #   - Sequential and parallel execution modes
 #   - Server exclusion handling (hosts.conf options and -x flag)
 #   - Cleanup on exit
@@ -210,6 +210,35 @@ setup_oknav_env() {
   assert_output_contains "DEBUG"
 }
 
+@test "-d enables preserve directory mode" {
+  setup_oknav_env
+  cd "$TEST_TEMP_DIR" || return 1
+  run ./oknav -d -D uptime
+  assert_output_contains "CURDIR"
+}
+
+@test "--dir enables preserve directory mode" {
+  setup_oknav_env
+  cd "$TEST_TEMP_DIR" || return 1
+  run ./oknav --dir -D uptime
+  assert_output_contains "CURDIR"
+}
+
+@test "-d shows current directory in debug output" {
+  setup_oknav_env
+  cd "$TEST_TEMP_DIR" || return 1
+  run ./oknav -d -D uptime
+  assert_output_contains "CURDIR  = $TEST_TEMP_DIR"
+}
+
+@test "-d passes -d flag to server command" {
+  setup_oknav_env ok0
+  cd "$TEST_TEMP_DIR" || return 1
+  run ./oknav -d uptime
+  # Check that -d was passed to sudo (which calls server symlink)
+  assert_mock_called "SUDO_CALL" "-d"
+}
+
 @test "invalid option --invalid exits with code 22" {
   setup_oknav_env
   cd "$TEST_TEMP_DIR" || return 1
@@ -236,6 +265,23 @@ setup_oknav_env() {
   run ./oknav -Dp uptime
   assert_output_contains "DEBUG"
   assert_output_contains "parallel"
+}
+
+@test "-pd combines parallel and preserve directory" {
+  setup_oknav_env
+  cd "$TEST_TEMP_DIR" || return 1
+  run ./oknav -pd -D uptime
+  assert_output_contains "parallel"
+  assert_output_contains "CURDIR"
+}
+
+@test "-Dpd combines debug, parallel, and preserve directory" {
+  setup_oknav_env
+  cd "$TEST_TEMP_DIR" || return 1
+  run ./oknav -Dpd uptime
+  assert_output_contains "DEBUG"
+  assert_output_contains "parallel"
+  assert_output_contains "CURDIR"
 }
 
 # ==============================================================================
