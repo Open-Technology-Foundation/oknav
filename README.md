@@ -142,6 +142,7 @@ oknav [OPTIONS] -- <command>    # Force command mode
 | Option | Description |
 |--------|-------------|
 | `-p, --parallel` | Execute simultaneously |
+| `-d, --dir` | Preserve current working directory |
 | `-t, --timeout SECS` | Connection timeout (default: 30) |
 | `-x, --exclude-host HOST` | Exclude server (repeatable) |
 | `-D, --debug` | Show server discovery details |
@@ -154,6 +155,8 @@ oknav [OPTIONS] -- <command>    # Force command mode
 ```bash
 oknav uptime                 # Sequential execution
 oknav -p df -h               # Parallel execution
+oknav -d ls                  # Run in current directory
+oknav -pd pwd                # Parallel, preserve directory
 oknav -pt 10 uptime          # Parallel + 10s timeout
 oknav -x srv1 -x srv2 uptime # Exclude multiple servers
 oknav -D hostname            # Debug: show discovered servers
@@ -308,6 +311,7 @@ bash -n oknav && bash -n ok_master && bash -n common.inc.sh
 | `ok_master` | `-d` | Preserve directory |
 | `ok_master` | `-D` | Debug mode |
 | `oknav` | `-p` | Parallel execution |
+| `oknav` | `-d` | Preserve directory |
 | `oknav` | `-t SECS` | Timeout (default: 30) |
 | `oknav` | `-x HOST` | Exclude host (repeatable) |
 | `oknav` | `-D` | Debug mode |
