@@ -80,6 +80,13 @@ cleanup() {
 trap 'cleanup $?' SIGINT SIGTERM EXIT
 
 # ------------------------------------------------------------------------------
+# preserve_dir() - Output -d flag if directory preservation enabled
+# Used in command substitution to conditionally add -d to server commands.
+# Returns: 0 always (safe for set -e)
+# ------------------------------------------------------------------------------
+preserve_dir() { ((PRESERVE_DIR == 0)) || echo '-d'; }
+
+# ------------------------------------------------------------------------------
 # usage() - Display help message
 # ------------------------------------------------------------------------------
 usage() {
@@ -728,8 +735,8 @@ run_command() {
 
   # Capture all output (stdout + stderr) to temp file
   { echo "+++$server:"
-    #shellcheck disable=SC2046  # Intentional: expands to nothing when PRESERVE_DIR=0
-    timeout "$TIMEOUT"s sudo "$server" $( ((PRESERVE_DIR)) && echo '-d' ) "$@" || {
+    #shellcheck disable=SC2046  # preserve_dir outputs '-d' or nothing (no spaces)
+    timeout "$TIMEOUT"s sudo "$server" $(preserve_dir) "$@" || {
       exit_code=$?
       case $exit_code in
         124) echo "Connection timeout after $TIMEOUT seconds" ;;
@@ -788,8 +795,8 @@ else
   for server in "${SERVERS[@]}"; do
     ((first)) && echo || first=1
     echo "+++$server:"
-    #shellcheck disable=SC2046  # Intentional: expands to nothing when PRESERVE_DIR=0
-    timeout "$TIMEOUT"s sudo "$server" $( ((PRESERVE_DIR)) && echo '-d' ) "$@" || {
+    #shellcheck disable=SC2046  # preserve_dir outputs '-d' or nothing (no spaces)
+    timeout "$TIMEOUT"s sudo "$server" $(preserve_dir) "$@" || {
       exit_code=$?
       case $exit_code in
         124) echo "Connection timeout after $TIMEOUT seconds" ;;
