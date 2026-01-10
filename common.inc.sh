@@ -41,7 +41,7 @@ shopt -s inherit_errexit
 
 # Global configuration
 ### VERSION managed by version
-declare -r VERSION=2.3.3
+declare -r VERSION=2.3.4
 ###
 
 # Set up runtime directory for temporary files
