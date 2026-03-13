@@ -13,6 +13,7 @@
 #   add          Create ad-hoc host launcher (requires sudo)
 #   remove       Remove ad-hoc host launcher (requires sudo)
 #   list         List installed host symlinks with source and status
+#   help         Show usage help
 #
 # Use -- to force command mode (bypass subcommand detection):
 #   oknav -- list /tmp      Run 'list /tmp' on servers, not the list subcommand
@@ -62,7 +63,7 @@ declare -- temp_file_path          # Path to temp file reference marker
 
 # ------------------------------------------------------------------------------
 # cleanup() - Remove temporary files and exit
-# Args: [exit_code] - Exit code to preserve (default: 0)
+# Args: [exit_code] - Exit code to preserve (passed via trap as $?)
 # Called by: trap on SIGINT, SIGTERM, EXIT
 # ------------------------------------------------------------------------------
 cleanup() {
@@ -88,7 +89,7 @@ trap 'cleanup $?' SIGINT SIGTERM EXIT
 preserve_dir() { ((PRESERVE_DIR == 0)) || echo '-d'; }
 
 # ------------------------------------------------------------------------------
-# connect_timeout_opt() - Output -c N if connect timeout is set
+# connect_timeout_opt() - Output -c N for connect timeout
 # Used in command substitution to pass connect-timeout to ok_master.
 # Returns: 0 always (safe for set -e)
 # ------------------------------------------------------------------------------
@@ -143,6 +144,7 @@ HELP
 # install_symlinks() - Create/manage symlinks in /usr/local/bin
 # Creates symlinks for all aliases defined in hosts.conf, pointing to ok_master.
 # Options: -n/--dry-run, --remove-stale, --clean-local
+# Note: --remove-stale and --clean-local scan ok*-prefixed symlinks only
 # Returns: 0 on success, 22 on invalid option
 # ------------------------------------------------------------------------------
 install_symlinks() {
@@ -167,8 +169,8 @@ Symlinks point to ok_master for server resolution.
 
 Options:
   -n, --dry-run      Preview changes (no modifications)
-  --remove-stale     Remove symlinks not in hosts.conf
-  --clean-local      Remove symlinks from script directory
+  --remove-stale     Remove ok*-prefixed symlinks not in hosts.conf
+  --clean-local      Remove ok*-prefixed symlinks from script directory
   -h, --help         Show this help
 
 Examples:
@@ -240,7 +242,7 @@ HELP
     done
   fi
 
-  # Clean local symlinks
+  # Clean local symlinks (ok*-prefixed only)
   if ((clean_local)); then
     local -- link name
     for link in "$SCRIPT_DIR"/ok*; do
@@ -450,7 +452,7 @@ List all host launcher symlinks pointing to ok_master.
 Shows source (hosts.conf or ad-hoc) for each host.
 
 Options:
-  -R, --reachable  Test SSH connectivity (5s timeout per host)
+  -R, --reachable  Test SSH connectivity (3s connect, 10s total per host)
   -p, --parallel   Test hosts in parallel (use with -R)
   -h, --help       Show this help
 
@@ -604,6 +606,7 @@ while (($#)); do
       usage
       exit 0 ;;
     -[xcptdDVh]*) # Handle combined short options (e.g., -pD becomes -p -D)
+                  # Note: -x/-c/-t take arguments and must not be combined
       #shellcheck disable=SC2046
       set -- '' $(printf -- '-%c ' $(grep -o . <<<"${1:1}")) "${@:2}" ;;
     --)
@@ -733,8 +736,8 @@ fi
 # run_command() - Execute command on single server (parallel mode helper)
 # Captures output to temp file for ordered display after all complete.
 # Args: server command [args...]
-# Returns: 0 success, 1 temp file creation failed
-# Timeout exit codes: 124=timeout, 125=timeout error, 126=command not found
+# Returns: 0 always (errors handled internally), 1 temp file creation failed
+# Timeout codes 124/125/126 are reported as output messages, not return codes
 # ------------------------------------------------------------------------------
 run_command() {
   local -- server=$1

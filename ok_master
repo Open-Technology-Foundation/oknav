@@ -7,8 +7,9 @@
 # etc.) is resolved through hosts.conf to determine the target FQDN.
 #
 # On SSH connection failure (exit 255), optionally retries through a relay
-# host via ProxyJump (-J). Relay configured via /etc/oknav/relay.conf,
-# OKNAV_RELAY env, or --relay flag. See usage for priority order.
+# host via ProxyCommand (nc). Relay configured via /etc/oknav/relay.conf,
+# OKNAV_RELAY env, --relay flag, or disabled with --no-relay. See usage
+# for priority order.
 #
 # Resolution order:
 #   1. Look up symlink name in hosts.conf → FQDN
@@ -47,7 +48,7 @@ declare -- CURDIR=''               # Remote directory (-d preserves PWD)
 declare -- CMD=''                  # Remote command (empty = interactive shell)
 declare -- SSHOPTS=''              # SSH options (-t for interactive)
 declare -i CONNECT_TIMEOUT=${OKNAV_CONNECT_TIMEOUT:-10}  # SSH handshake timeout
-declare -- RELAY=''                # Relay/jump host for failover
+declare -- RELAY=''                # Relay host for ProxyCommand failover
 declare -i NO_RELAY=0             # Disable relay for this invocation
 
 usage() {
@@ -70,7 +71,7 @@ Options:
   -h, --help                Show this help
 
 Relay Failover:
-  On SSH connection failure (exit 255), retry via ProxyJump through a relay.
+  On SSH connection failure (exit 255), retry via ProxyCommand (nc) through a relay.
   Priority: --relay flag > OKNAV_RELAY env > /etc/oknav/relay.conf
   Set OKNAV_RELAY=none to disable. Use non-WG endpoints for WG outages.
 
@@ -107,6 +108,7 @@ while (($#)); do
     -h|--help)    usage; exit 0 ;;
 
     -[ucrdDVhR]*) # Expand combined options: -rd → -r -d
+                  # Note: -u/-c/-R take arguments and must not be combined
                   #shellcheck disable=SC2046
                   set -- '' $(printf -- '-%c ' $(grep -o . <<<"${1:1}")) "${@:2}" ;;
 

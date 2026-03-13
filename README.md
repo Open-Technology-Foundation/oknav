@@ -10,6 +10,7 @@ Lightweight SSH orchestration for multi-server environments.
 - **Host connectivity testing** with reachability checks
 - **Ad-hoc launchers** without config file editing
 - **Local-only restrictions** for host-specific access control
+- **Relay failover** on SSH connection failure via ProxyCommand (nc)
 
 ## Quick Start
 
@@ -116,6 +117,8 @@ srv1 [OPTIONS] [command]
 | `-u, --user USER` | Connect as specified user |
 | `-c, --connect-timeout S` | SSH connect timeout (default: 10) |
 | `-d, --dir` | Preserve current working directory |
+| `-R, --relay HOST` | Override relay host for this invocation |
+| `--no-relay` | Disable relay failover for this invocation |
 | `-D, --debug` | Show connection parameters |
 | `-V, --version` | Show version |
 | `-h, --help` | Show help |
@@ -129,6 +132,35 @@ srv1 -r                      # Root shell
 srv1 -rd                     # Root shell, current directory
 srv1 -u deploy git pull      # Run as specific user
 srv1 "df -h | grep data"     # Complex commands (quote them)
+srv1 --relay relay-host uptime   # Force relay through specific host
+srv1 --no-relay uptime           # Disable relay failover
+```
+
+### Relay Failover
+
+When an SSH connection fails (exit code 255), ok_master can automatically retry through a relay host using ProxyCommand (nc). This is opt-in and machine-specific.
+
+**Resolution priority** (highest first):
+
+| Priority | Source | Description |
+|----------|--------|-------------|
+| 1 | `--no-relay` flag | Disable relay for this invocation |
+| 2 | `--relay HOST` / `-R HOST` flag | Override relay for this invocation |
+| 3 | `OKNAV_RELAY` env var | Override relay (set to `none` to disable) |
+| 4 | `/etc/oknav/relay.conf` | Persistent machine-specific default |
+| 5 | No relay configured | Direct connection only (original behavior) |
+
+**relay.conf format**: A single line containing an SSH config Host name or `user@host:port`.
+
+**Behavior**: When no relay is configured, ok_master uses `exec ssh` with zero overhead (original behavior). When a relay is configured, it tries a direct connection first and only relays on exit code 255. Other exit codes pass through unchanged. The relay info message is suppressed in quiet/cluster mode.
+
+**Examples**:
+
+```bash
+srv1 --relay jump-host uptime    # Force relay through specific host
+srv1 --no-relay uptime           # Disable relay for this invocation
+OKNAV_RELAY=none srv1 uptime     # Disable relay via env
+srv1 -D uptime                   # Debug output shows relay status
 ```
 
 ### Cluster Operations
@@ -173,6 +205,7 @@ oknav -- list /tmp           # Run 'list /tmp' (not subcommand)
 | `add` | Create ad-hoc launcher |
 | `remove` | Remove launcher |
 | `list` | List installed host symlinks |
+| `help` | Show usage help |
 
 #### install
 
@@ -181,16 +214,18 @@ Create symlinks in `/usr/local/bin` for all `hosts.conf` aliases:
 ```bash
 sudo oknav install                  # Create/update symlinks
 oknav install --dry-run             # Preview changes
-sudo oknav install --remove-stale   # Remove symlinks not in hosts.conf
-sudo oknav install --clean-local    # Remove dev symlinks from script dir
+sudo oknav install --remove-stale   # Remove ok*-prefixed symlinks not in hosts.conf
+sudo oknav install --clean-local    # Remove ok*-prefixed dev symlinks from script dir
 ```
 
 | Option | Description |
 |--------|-------------|
 | `-n, --dry-run` | Preview changes |
-| `--remove-stale` | Remove symlinks not in hosts.conf |
-| `--clean-local` | Remove symlinks from script directory |
+| `--remove-stale` | Remove ok*-prefixed symlinks not in hosts.conf |
+| `--clean-local` | Remove ok*-prefixed symlinks from script directory |
 | `-h, --help` | Show help |
+
+**Note**: Aliases that conflict with subcommand names (`install`, `add`, `remove`, `list`, `help`) trigger a warning during `oknav install`. Use `oknav -- <alias> <cmd>` to execute commands on such servers.
 
 #### add / remove
 
@@ -229,7 +264,7 @@ oknav list -R -p             # Parallel connectivity testing
 
 | Option | Description |
 |--------|-------------|
-| `-R, --reachable` | Test SSH connectivity (5s timeout) |
+| `-R, --reachable` | Test SSH connectivity (3s connect, 10s total per host) |
 | `-p, --parallel` | Test hosts in parallel (use with -R) |
 | `-h, --help` | Show help |
 
@@ -312,7 +347,11 @@ bash -n oknav && bash -n ok_master && bash -n common.inc.sh
 | `ok_master` | `-u USER` | Specific user |
 | `ok_master` | `-c SECS` | SSH connect timeout (default: 10) |
 | `ok_master` | `-d` | Preserve directory |
+| `ok_master` | `-R HOST` | Override relay host |
+| `ok_master` | `--no-relay` | Disable relay failover |
 | `ok_master` | `-D` | Debug mode |
+| `ok_master` | `-V` | Show version |
+| `ok_master` | `-h` | Show help |
 | `oknav` | `-p` | Parallel execution |
 | `oknav` | `-d` | Preserve directory |
 | `oknav` | `-c SECS` | SSH connect timeout (default: 10) |
@@ -320,9 +359,11 @@ bash -n oknav && bash -n ok_master && bash -n common.inc.sh
 | `oknav` | `-x HOST` | Exclude host (repeatable) |
 | `oknav` | `-D` | Debug mode |
 | `oknav` | `--` | Force command mode |
+| `oknav` | `-V` | Show version |
+| `oknav` | `-h` | Show help |
 | `install` | `-n` | Dry run |
-| `install` | `--remove-stale` | Remove stale symlinks |
-| `install` | `--clean-local` | Remove local symlinks |
+| `install` | `--remove-stale` | Remove stale ok* symlinks |
+| `install` | `--clean-local` | Remove local ok* symlinks |
 | `add` | `-n` | Dry run |
 | `remove` | `-n` | Dry run |
 | `list` | `-R` | Test reachability |
@@ -347,6 +388,7 @@ bash -n oknav && bash -n ok_master && bash -n common.inc.sh
 |----------|-------------|
 | `OKNAV_CONNECT_TIMEOUT` | Override default SSH connect timeout (default: 10) |
 | `OKNAV_HOSTS_CONF` | Override hosts.conf location |
+| `OKNAV_RELAY` | Override relay host for ok_master (set to `none` to disable) |
 | `OKNAV_TARGET_DIR` | Override target directory (for testing) |
 | `XDG_RUNTIME_DIR` | Temp file location (falls back to `/tmp`) |
 
@@ -362,7 +404,8 @@ bash -n oknav && bash -n ok_master && bash -n common.inc.sh
 └── install.sh         # Installer
 
 /etc/oknav/
-└── hosts.conf         # Server configuration
+├── hosts.conf         # Server configuration
+└── relay.conf         # Relay failover host (optional)
 
 /usr/local/bin/
 ├── oknav              # → /usr/local/share/oknav/oknav
@@ -412,7 +455,8 @@ oknav/
 **SSH connection failures**
 - Verify SSH key authentication: `ssh user@server echo OK`
 - Check hostname resolution: `getent hosts server1.example.com`
-- Use `-D` for debug output
+- Use `-D` for debug output (shows relay status)
+- Try `--no-relay` to test direct connection if relay is configured
 
 **Timeout errors**
 - Connect timeout (`-c`): controls SSH handshake (default: 10s)

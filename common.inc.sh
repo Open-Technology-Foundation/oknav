@@ -8,11 +8,13 @@
 #
 # Exports (readonly):
 #   VERSION              - OKnav version string
-#   TEMP_DIR             - Secure temp directory (XDG_RUNTIME_DIR or /tmp)
+#   TEMP_DIR             - Temp directory (XDG_RUNTIME_DIR preferred, /tmp fallback)
 #
-# Exports (mutable):
+# Exports (mutable, integer):
 #   VERBOSE              - Verbose output flag (default: 1)
 #   DEBUG                - Debug mode flag (default: 0)
+#
+# Globals (set, not exported):
 #   HOSTNAME             - Current machine hostname
 #
 # Arrays (populated by load_hosts_conf):
@@ -41,7 +43,7 @@ shopt -s inherit_errexit
 
 # Global configuration
 ### VERSION managed by version
-declare -r VERSION=2.3.6
+declare -r VERSION=2.3.7
 ###
 
 # Set up runtime directory for temporary files
