@@ -38,18 +38,28 @@
 # Requires: SCRIPT_NAME must be set before sourcing
 # ==============================================================================
 #shellcheck disable=SC2155,SC2034
-set -eu
+set -euo pipefail
 shopt -s inherit_errexit
+
+# Library guard: must be sourced, not executed
+[[ ${BASH_SOURCE[0]} != "$0" ]] || {
+  >&2 echo "$(basename -- "$0"): must be sourced, not executed"
+  exit 1
+}
+
+# Idempotency guard: allow re-sourcing without readonly re-declare errors
+[[ -z ${_OKNAV_COMMON_LOADED:-} ]] || return 0
+readonly -- _OKNAV_COMMON_LOADED=1
 
 # Global configuration
 ### VERSION managed by version
-declare -r VERSION=2.3.7
+declare -r VERSION=2.3.8
 ###
 
 # Set up runtime directory for temporary files
 # Prefers XDG_RUNTIME_DIR (typically /run/user/UID), falls back to /tmp
 declare -r RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$UID}"
-if [[ ! -d "$RUNTIME_DIR" ]] || [[ ! -w "$RUNTIME_DIR" ]]; then
+if [[ ! -d $RUNTIME_DIR ]] || [[ ! -w $RUNTIME_DIR ]]; then
   # Fall back to /tmp if runtime dir not available
   declare -r TEMP_DIR=/tmp
 else
@@ -70,8 +80,10 @@ fi
 
 # ------------------------------------------------------------------------------
 # Messaging Functions
-# All respect VERBOSE flag except error() which always outputs.
-# Icons: ◉ info, ▲ warn, ✓ success, ✗ error
+# Output gating: vecho/info/warn/success require VERBOSE=1;
+#   debug requires DEBUG=1 (independent of VERBOSE); error always outputs.
+# Streams: vecho → stdout, all others → stderr.
+# Prefixes: ◉ info, ▲ warn, ✓ success, ✗ error, 'DEBUG:' for debug.
 # ------------------------------------------------------------------------------
 _msg() {
   local -- prefix="$SCRIPT_NAME:" msg
@@ -97,6 +109,14 @@ error()   { >&2 _msg "$@"; }                          # Error (always, stderr)
 # Args: exit_code [message...]
 # Default exit code: 1
 die() { (($# < 2)) || error "${@:2}"; exit "${1:-1}"; }
+
+# ------------------------------------------------------------------------------
+# noarg() - Validate that an option has a following argument
+# Args: "$@" (original positional args from option-parsing loop)
+# Exits 22 if no argument follows the current option
+# Usage: -x|--exclude) noarg "$@"; shift; VAR=$1 ;;
+# ------------------------------------------------------------------------------
+noarg() { (($# > 1)) || die 22 "Option ${1@Q} requires an argument"; }
 
 
 # ------------------------------------------------------------------------------
@@ -143,13 +163,13 @@ declare -gA FQDN_PRIMARY_ALIAS=() # FQDN → primary (first) alias
 # ------------------------------------------------------------------------------
 find_hosts_conf() {
   # Environment override (for testing)
-  if [[ -n "${OKNAV_HOSTS_CONF:-}" && -f "$OKNAV_HOSTS_CONF" ]]; then
+  if [[ -n ${OKNAV_HOSTS_CONF:-} && -f $OKNAV_HOSTS_CONF ]]; then
     echo "$OKNAV_HOSTS_CONF"
     return 0
   fi
   local -- config
   for config in /etc/oknav/hosts.conf "${SCRIPT_DIR:-$(dirname "$0")}/hosts.conf"; do
-    [[ -f "$config" ]] && { echo "$config"; return 0; } ||:
+    [[ -f $config ]] && { echo "$config"; return 0; } ||:
   done
   return 1
 }
@@ -158,7 +178,7 @@ find_hosts_conf() {
 # load_hosts_conf() - Parse hosts.conf into global arrays
 # Args: [path] (default: auto-detect)
 # Populates: ALIAS_TO_FQDN, ALIAS_OPTIONS, ALIAS_LIST, FQDN_PRIMARY_ALIAS
-# Dies on: missing file, empty file
+# Dies on: missing file, no valid entries
 # ------------------------------------------------------------------------------
 load_hosts_conf() {
   local -- hosts_file="${1:-}"
@@ -166,7 +186,7 @@ load_hosts_conf() {
   local -- options_re='[(]([^)]+)[)][[:space:]]*$'
 
   # Auto-detect hosts.conf if not provided
-  if [[ -z "$hosts_file" ]]; then
+  if [[ -z $hosts_file ]]; then
     hosts_file=$(find_hosts_conf) || die 1 'hosts.conf not found in /etc/oknav/ or script directory'
   fi
 
@@ -176,15 +196,15 @@ load_hosts_conf() {
   ALIAS_LIST=()
   FQDN_PRIMARY_ALIAS=()
 
-  [[ -f "$hosts_file" ]] || die 1 "hosts.conf not found ${hosts_file@Q}"
+  [[ -f $hosts_file ]] || die 1 "hosts.conf not found ${hosts_file@Q}"
 
   while IFS= read -r line || [[ -n "$line" ]]; do
     # Skip empty lines and comments
-    [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue ||:
+    [[ -z $line || "$line" =~ ^[[:space:]]*# ]] && continue ||:
 
     # Extract options if present: (option1,option2)
     options=''
-    if [[ "$line" =~ $options_re ]]; then
+    if [[ $line =~ $options_re ]]; then
       options="${BASH_REMATCH[1]}"
       line="${line%\(*}"  # Remove options from line
     fi
@@ -194,18 +214,18 @@ load_hosts_conf() {
 
     # Split: first field is FQDN, rest are aliases
     read -r fqdn aliases <<< "$line"
-    [[ -n "$fqdn" ]] || continue
+    [[ -n $fqdn ]] || continue
 
     # Register each alias (first alias becomes primary)
     local -- first_alias=''
     for alias in $aliases; do
-      ALIAS_TO_FQDN["$alias"]="$fqdn"
-      ALIAS_OPTIONS["$alias"]="$options"
+      ALIAS_TO_FQDN["$alias"]=$fqdn
+      ALIAS_OPTIONS["$alias"]=$options
       ALIAS_LIST+=("$alias")
-      [[ -z "$first_alias" ]] && first_alias="$alias"
+      [[ -n $first_alias ]] || first_alias=$alias
     done
     # Store primary (first) alias for this FQDN
-    [[ -n "$first_alias" ]] && FQDN_PRIMARY_ALIAS["$fqdn"]="$first_alias"
+    [[ -z $first_alias ]] || FQDN_PRIMARY_ALIAS["$fqdn"]=$first_alias
   done < "$hosts_file"
 
   ((${#ALIAS_TO_FQDN[@]})) || die 1 'No valid entries in hosts.conf'
@@ -224,14 +244,14 @@ resolve_alias() {
   local -- local_only_re='local-only:([^,)]+)'
 
   fqdn="${ALIAS_TO_FQDN[$alias]:-}"
-  [[ -n "$fqdn" ]] || return 1
+  [[ -n $fqdn ]] || return 1
 
   options="${ALIAS_OPTIONS[$alias]:-}"
 
   # Check local-only constraint
-  if [[ "$options" =~ $local_only_re ]]; then
+  if [[ $options =~ $local_only_re ]]; then
     required_host="${BASH_REMATCH[1]}"
-    if [[ "$HOSTNAME" != "$required_host" ]]; then
+    if [[ $HOSTNAME != "$required_host" ]]; then
       error "$alias: restricted to host ${required_host@Q} (current: ${HOSTNAME@Q})"
       return 2
     fi
@@ -242,6 +262,7 @@ resolve_alias() {
 
 # ------------------------------------------------------------------------------
 # is_excluded() - Check for (exclude) option
+# Args: alias
 # Returns: 0 if excluded, 1 if not
 # ------------------------------------------------------------------------------
 is_excluded() {
@@ -251,6 +272,7 @@ is_excluded() {
 
 # ------------------------------------------------------------------------------
 # is_oknav() - Check for (oknav) option on primary alias
+# Args: alias
 # Returns: 0 if oknav-enabled AND primary alias, 1 otherwise
 # Note: Secondary aliases for same FQDN return 1 even with (oknav)
 # ------------------------------------------------------------------------------
@@ -258,12 +280,13 @@ is_oknav() {
   local -- alias=$1
   local -- options="${ALIAS_OPTIONS[$alias]:-}"
   local -- fqdn="${ALIAS_TO_FQDN[$alias]:-}"
-  [[ "$options" == *oknav* ]] || return 1
-  [[ "${FQDN_PRIMARY_ALIAS[$fqdn]:-}" == "$alias" ]]
+  [[ $options == *oknav* ]] || return 1
+  [[ ${FQDN_PRIMARY_ALIAS[$fqdn]:-} == "$alias" ]]
 }
 
 # ------------------------------------------------------------------------------
 # get_local_only_host() - Extract hostname from (local-only:HOST)
+# Args: alias
 # Stdout: hostname or empty
 # Returns: 0 always
 # ------------------------------------------------------------------------------
@@ -271,7 +294,7 @@ get_local_only_host() {
   local -- alias=$1
   local -- options="${ALIAS_OPTIONS[$alias]:-}"
   local -- local_only_re='local-only:([^,)]+)'
-  if [[ "$options" =~ $local_only_re ]]; then
+  if [[ $options =~ $local_only_re ]]; then
     echo "${BASH_REMATCH[1]}"
   fi
 }

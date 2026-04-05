@@ -159,8 +159,9 @@ giving up. Unreachable hosts fail fast without consuming the
 execution timeout.
 .TP
 .BR \-t ", " \-\-timeout " " \fISECS\fR
-Set overall execution timeout in seconds. Default is 120.
-This wraps the entire SSH call (connection + command execution).
+Set per-server execution timeout in seconds. Default is 120.
+Applied to each SSH call individually (connection + command execution).
+In sequential mode, total wall-clock can reach N \[mu] SECS.
 .TP
 .BR \-x ", " \-\-exclude\-host " " \fIHOST\fR
 Exclude
@@ -387,6 +388,14 @@ Invalid command-line option (EINVAL).
 .B 42
 Direct ok_master execution. The ok_master script must be invoked
 via a symlink (e.g., srv1), not directly as ok_master.
+.PP
+The following are per-server status codes from
+.BR timeout (1),
+shown as output messages by
+.B oknav
+(absorbed, not propagated as
+.B oknav
+exit codes):
 .TP
 .B 124
 Execution timeout reached.

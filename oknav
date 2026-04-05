@@ -19,9 +19,11 @@
 #   oknav -- list /tmp      Run 'list /tmp' on servers, not the list subcommand
 #
 # Exit codes:
-#   0    Success
+#   0    Success (per-server failures are absorbed, not propagated)
 #   1    General error (no servers found, missing config)
 #   22   Invalid option (EINVAL)
+#
+# Per-server status codes (from timeout(1), shown as output messages):
 #   124  Execution timeout
 #   125  Timeout command error
 #   126  Command not found
@@ -47,7 +49,7 @@ source "$SCRIPT_DIR"/common.inc.sh || exit 1
 # Runtime Configuration
 # ------------------------------------------------------------------------------
 declare -i PARALLEL=0              # Execution mode: 0=sequential, 1=parallel
-declare -i TIMEOUT=${TIMEOUT:-120} # Overall execution timeout in seconds
+declare -i TIMEOUT=${TIMEOUT:-120} # Per-server execution timeout in seconds
 declare -i CONNECT_TIMEOUT=${OKNAV_CONNECT_TIMEOUT:-10}  # SSH handshake timeout
 declare -i FORCE_EXEC=0            # Force multi-execute mode (bypass subcommands)
 declare -a TEMP_FILES=()           # Temp files to clean up on exit
@@ -55,7 +57,6 @@ declare -a ok_server_excludes=()   # Servers excluded via -x option
 declare -i PRESERVE_DIR=0          # Pass -d to server commands
 
 # Working variables (declared here to satisfy strict mode)
-declare -i exit_code               # Captured exit code from ssh/timeout
 declare -- server                  # Current server alias being processed
 declare -- pid                     # Background process ID (parallel mode)
 declare -- temp_file               # Path to server output temp file
@@ -72,7 +73,7 @@ cleanup() {
   # Remove tracked temp files
   local -- file
   for file in "${TEMP_FILES[@]}"; do
-    [[ -f "$file" ]] && rm -f "$file"
+    [[ -f $file ]] && rm -f "$file" ||:
   done
   # Remove orphaned temp files (parallel subshells don't update TEMP_FILES)
   rm -f "${TEMP_DIR:-/tmp}"/"${SCRIPT_NAME:-}"_*_* 2>/dev/null || true
@@ -96,6 +97,23 @@ preserve_dir() { ((PRESERVE_DIR == 0)) || echo '-d'; }
 connect_timeout_opt() { echo "-c $CONNECT_TIMEOUT"; }
 
 # ------------------------------------------------------------------------------
+# report_timeout_error() - Emit human-readable message for timeout/exec codes
+# Args: server_alias exit_code
+# Outputs: descriptive message for codes 124/125/126 (nothing for others)
+# Called from both sequential and parallel execution paths
+# Returns: 0 always (safe for set -e callers via `|| ... ||:`)
+# ------------------------------------------------------------------------------
+report_timeout_error() {
+  local -- srv=$1
+  local -i rc=$2
+  case $rc in
+    124) echo "Execution timeout after $TIMEOUT seconds" ;;
+    125) echo 'Timeout command error' ;;
+    126) echo "Command not found ${srv@Q}" ;;
+  esac
+}
+
+# ------------------------------------------------------------------------------
 # usage() - Display help message
 # ------------------------------------------------------------------------------
 usage() {
@@ -116,7 +134,7 @@ Options:
   -p, --parallel               Execute simultaneously on all servers
   -d, --dir                    Preserve current working directory
   -c, --connect-timeout SECS   SSH connect timeout (default: $CONNECT_TIMEOUT)
-  -t, --timeout SECS           Overall execution timeout (default: $TIMEOUT)
+  -t, --timeout SECS           Per-server execution timeout (default: $TIMEOUT)
   -x, --exclude-host HOST      Exclude host from this run (repeatable)
   -D, --debug                  Show server discovery and execution details
   -V, --version                Show version
@@ -154,7 +172,7 @@ install_symlinks() {
 
   # Locate ok_master: prefer installed location, fall back to dev directory
   local -- ok_master=/usr/local/share/oknav/ok_master
-  [[ -f "$ok_master" ]] || ok_master="$SCRIPT_DIR"/ok_master
+  [[ -f $ok_master ]] || ok_master="$SCRIPT_DIR"/ok_master
 
   while (($#)); do
     case $1 in
@@ -197,7 +215,7 @@ HELP
   local -- alias_name reserved
   for alias_name in "${ALIAS_LIST[@]}"; do
     for reserved in "${reserved_names[@]}"; do
-      if [[ "$alias_name" == "$reserved" ]]; then
+      if [[ $alias_name == "$reserved" ]]; then
         warn "alias ${alias_name@Q} conflicts with oknav subcommand"
         warn "  use 'oknav -- $alias_name <cmd>' to execute on this server"
       fi
@@ -211,15 +229,15 @@ HELP
   local -- alias target
   for alias in "${ALIAS_LIST[@]}"; do
     target="$target_dir/$alias"
-    if [[ -L "$target" ]]; then
-      if [[ "$(readlink "$target")" == "$ok_master" ]]; then
+    if [[ -L $target ]]; then
+      if [[ $(readlink "$target") == "$ok_master" ]]; then
         skipped+=1
       else
         info "  update: $alias (was → $(readlink "$target"))"
         ((dry_run)) || sudo ln -sf "$ok_master" "$target"
         updated+=1
       fi
-    elif [[ -e "$target" ]]; then
+    elif [[ -e $target ]]; then
       warn "  $alias: file exists (not a symlink) - skipping"
     else
       info "  create: $alias"
@@ -232,10 +250,10 @@ HELP
   if ((remove_stale)); then
     local -- link name
     for link in "$target_dir"/ok*; do
-      [[ -L "$link" ]] || continue
-      [[ "$(readlink "$link")" == "$ok_master" ]] || continue
+      [[ -L $link ]] || continue
+      [[ $(readlink "$link") == "$ok_master" ]] || continue
       name="${link##*/}"
-      [[ -z "${ALIAS_TO_FQDN[$name]:-}" ]] || continue
+      [[ -z ${ALIAS_TO_FQDN[$name]:-} ]] || continue
       info "  remove: $name (stale)"
       ((dry_run)) || sudo rm -f "$link"
       removed+=1
@@ -246,8 +264,8 @@ HELP
   if ((clean_local)); then
     local -- link name
     for link in "$SCRIPT_DIR"/ok*; do
-      [[ -L "$link" ]] || continue
-      name="${link##*/}"
+      [[ -L $link ]] || continue
+      name=${link##*/}
       info "  remove: $name (local)"
       ((dry_run)) || rm -f "$link"
       removed+=1
@@ -272,7 +290,7 @@ add_host() {
 
   # Locate ok_master: prefer installed location, fall back to dev directory
   local -- ok_master=/usr/local/share/oknav/ok_master
-  [[ -f "$ok_master" ]] || ok_master="$SCRIPT_DIR"/ok_master
+  [[ -f $ok_master ]] || ok_master="$SCRIPT_DIR"/ok_master
 
   while (($#)); do
     case $1 in
@@ -330,20 +348,20 @@ HELP
   local -- alias target reply
   for alias in "${aliases[@]}"; do
     target="$target_dir"/"$alias"
-    if [[ -L "$target" ]]; then
-      if [[ "$(readlink "$target")" == "$ok_master" ]]; then
+    if [[ -L $target ]]; then
+      if [[ $(readlink "$target") == "$ok_master" ]]; then
         info "  skip: $alias (already exists)"
       else
         # Symlink exists but points elsewhere
         if [[ -t 0 && -t 1 ]]; then
           # Interactive: prompt user
           read -rp "oknav: $alias exists (→ $(readlink "$target")). Overwrite? [y/N] " reply
-          [[ "$reply" =~ ^[Yy] ]] || { info "  skip: $alias"; continue; }
+          [[ $reply =~ ^[Yy] ]] || { info "  skip: $alias"; continue; }
         fi
         info "  update: $alias (was: $(readlink "$target"))"
         ((dry_run)) || sudo ln -sf "$ok_master" "$target"
       fi
-    elif [[ -e "$target" ]]; then
+    elif [[ -e $target ]]; then
       warn "  $alias: file exists (not a symlink) - skipping"
     else
       info "  create: $alias → $hostname"
@@ -365,7 +383,7 @@ remove_host() {
 
   # Locate ok_master for symlink validation
   local -- ok_master=/usr/local/share/oknav/ok_master
-  [[ -f "$ok_master" ]] || ok_master="$SCRIPT_DIR"/ok_master
+  [[ -f $ok_master ]] || ok_master="$SCRIPT_DIR"/ok_master
 
   while (($#)); do
     case $1 in
@@ -407,14 +425,14 @@ HELP
   local -- alias target
   for alias in "$@"; do
     target="$target_dir"/"$alias"
-    if [[ -L "$target" ]]; then
-      if [[ "$(readlink "$target")" == "$ok_master" ]]; then
+    if [[ -L $target ]]; then
+      if [[ $(readlink "$target") == "$ok_master" ]]; then
         info "  remove: $alias"
         ((dry_run)) || sudo rm -f "$target"
       else
         warn "  $alias: symlink points elsewhere - skipping"
       fi
-    elif [[ -e "$target" ]]; then
+    elif [[ -e $target ]]; then
       warn "  $alias: not a symlink - skipping"
     else
       warn "  $alias: not found"
@@ -435,7 +453,7 @@ list_hosts() {
 
   # Locate ok_master: prefer installed location, fall back to dev directory
   local -- ok_master=/usr/local/share/oknav/ok_master
-  [[ -f "$ok_master" ]] || ok_master="$SCRIPT_DIR"/ok_master
+  [[ -f $ok_master ]] || ok_master="$SCRIPT_DIR"/ok_master
 
   # Parse options
   while (($#)); do
@@ -483,21 +501,21 @@ HELP
   local -- link name target
 
   while IFS= read -r link; do
-    [[ -L "$link" ]] || continue
+    [[ -L $link ]] || continue
     target=$(readlink "$link")
     # Check if symlink target ends with ok_master
-    [[ "${target##*/}" == ok_master ]] || continue
+    [[ ${target##*/} == ok_master ]] || continue
     name="${link##*/}"
-    [[ "$name" == ok_master ]] && continue ||:
+    [[ $name == ok_master ]] && continue ||:
     aliases+=("$name")
   done < <(find "$target_dir" -maxdepth 1 -type l 2>/dev/null | sort)
 
   # Build host info array (name:source:fqdn)
   local -a host_info=()
-  local -- fqdn source
+  local -- fqdn source info
   for name in "${aliases[@]}"; do
-    if [[ -n "${ALIAS_TO_FQDN[$name]:-}" ]]; then
-      fqdn="${ALIAS_TO_FQDN[$name]}"
+    if [[ -n ${ALIAS_TO_FQDN[$name]:-} ]]; then
+      fqdn=${ALIAS_TO_FQDN[$name]}
       source=hosts.conf
     else
       fqdn=$name
@@ -579,21 +597,21 @@ HELP
 while (($#)); do
   case $1 in
     -x|--exclude-host)
-      shift
-      ok_server_excludes+=("$1");;
-    -p|--parallel|parallel)
+      noarg "$@"; shift
+      ok_server_excludes+=("$1") ;;
+    -p|--parallel)
       PARALLEL=1 ;;
     -c|--connect-timeout)
-      shift
-      CONNECT_TIMEOUT=${1:-10}
-      [[ "$CONNECT_TIMEOUT" =~ ^[0-9]+$ ]] || die 22 "Invalid connect-timeout value ${CONNECT_TIMEOUT@Q}" ;;
+      noarg "$@"; shift
+      CONNECT_TIMEOUT=$1
+      [[ $CONNECT_TIMEOUT =~ ^[0-9]+$ ]] || die 22 "Invalid connect-timeout value ${CONNECT_TIMEOUT@Q}" ;;
     -t|--timeout)
-      shift
-      TIMEOUT=${1:-120}  # Use provided timeout or keep default
-      [[ "$TIMEOUT" =~ ^[0-9]+$ ]] || die 22 "Invalid timeout value ${TIMEOUT@Q}" ;;
+      noarg "$@"; shift
+      TIMEOUT=$1
+      [[ $TIMEOUT =~ ^[0-9]+$ ]] || die 22 "Invalid timeout value ${TIMEOUT@Q}" ;;
     -d|--dir)
       # Verify PWD exists (handles edge case of deleted directory)
-      if [[ ! -d "$PWD" ]]; then
+      if [[ ! -d $PWD ]]; then
         die 1 "Current directory does not exist: ${PWD@Q}"
       fi
       PRESERVE_DIR=1 ;;
@@ -674,13 +692,13 @@ for alias in "${ALIAS_LIST[@]}"; do
 
   # Check for (local-only) constraint violation
   required_host=$(get_local_only_host "$alias")
-  if [[ -n "$required_host" && "$HOSTNAME" != "$required_host" ]]; then
+  if [[ -n $required_host && $HOSTNAME != "$required_host" ]]; then
     continue
   fi
 
-  # Check command-line exclusions (-x options)
+  # Check command-line exclusions (-x options, BCS bash-306 space-padded match)
   if ((${#ok_server_excludes[@]})); then
-    printf '%s\n' "${ok_server_excludes[@]}" | grep -Fxq "$alias" && continue
+    [[ " ${ok_server_excludes[*]} " == *" $alias "* ]] && continue ||:
   fi
 
   SERVERS+=("$alias")
@@ -691,7 +709,7 @@ if ((${#SERVERS[@]} == 0)); then
   error 'No cluster servers found'
   echo >&2
   # Check if command looks like a typo of a subcommand
-  if [[ -n "${1:-}" ]]; then
+  if [[ -n ${1:-} ]]; then
     case "$1" in
       instal|instll|inst|nstall)
         info "Did you mean: oknav install"
@@ -728,7 +746,7 @@ if ((DEBUG)); then
   >&2 echo "  TIMEOUT = ${TIMEOUT}s"
   >&2 echo "  CONN_TIMEOUT = ${CONNECT_TIMEOUT}s"
   ((${#ok_server_excludes[@]})) && >&2 echo "  EXCLUDE = ${ok_server_excludes[*]}"
-  ((PRESERVE_DIR)) && >&2 echo "  CURDIR  = $PWD"
+  ((PRESERVE_DIR)) && >&2 echo "  CURDIR  = $PWD" ||:
   >&2 echo
 fi
 
@@ -753,15 +771,8 @@ run_command() {
   # Capture all output (stdout + stderr) to temp file
   { echo "+++$server:"
     #shellcheck disable=SC2046  # preserve_dir/connect_timeout_opt output flags (no spaces to worry about)
-    timeout "$TIMEOUT"s sudo "$server" $(preserve_dir) $(connect_timeout_opt) "$@" || {
-      exit_code=$?
-      case $exit_code in
-        124) echo "Execution timeout after $TIMEOUT seconds" ;;
-        125) echo 'Timeout command error' ;;
-        126) echo "Command not found: $server" ;;
-      esac
-      true  # Continue regardless of error
-    }
+    timeout "$TIMEOUT"s sudo "$server" $(preserve_dir) $(connect_timeout_opt) "$@" \
+      || report_timeout_error "$server" "$?" ||:
     echo
   } &> "$temp_file"
 
@@ -794,9 +805,9 @@ if (( PARALLEL )); then
   # Display outputs in server order (not completion order)
   for server in "${SERVERS[@]}"; do
     temp_file_path="$TEMP_DIR"/."$SCRIPT_NAME"_"$server"_tempfile
-    if [[ -f "$temp_file_path" ]]; then
+    if [[ -f $temp_file_path ]]; then
       temp_file=$(<"$temp_file_path")
-      if [[ -f "$temp_file" ]]; then
+      if [[ -f $temp_file ]]; then
         ((first)) && echo || first=1
         cat "$temp_file"
       else
@@ -813,15 +824,8 @@ else
     ((first)) && echo || first=1
     echo "+++$server:"
     #shellcheck disable=SC2046  # preserve_dir/connect_timeout_opt output flags (no spaces to worry about)
-    timeout "$TIMEOUT"s sudo "$server" $(preserve_dir) $(connect_timeout_opt) "$@" || {
-      exit_code=$?
-      case $exit_code in
-        124) echo "Execution timeout after $TIMEOUT seconds" ;;
-        125) echo 'Timeout command error' ;;
-        126) echo "Command not found ${server@Q}" ;;
-      esac
-      true  # Continue regardless of error
-    }
+    timeout "$TIMEOUT"s sudo "$server" $(preserve_dir) $(connect_timeout_opt) "$@" \
+      || report_timeout_error "$server" "$?" ||:
     echo
   done
 fi

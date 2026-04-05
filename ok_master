@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+#shellcheck disable=SC2015
 # ==============================================================================
 # OKnav - Individual Server SSH Handler
 # ==============================================================================
@@ -19,8 +20,8 @@
 #   0   Success
 #   1   General error
 #   2   Local-only constraint violated (server restricted to specific host)
+#   21  Invalid state (must invoke via symlink, not as 'ok_master')
 #   22  Invalid option (EINVAL)
-#   42  Direct execution (must invoke via symlink, not as 'ok_master')
 #
 # Related:
 #   oknav          - Cluster orchestrator (multi-server commands)
@@ -43,7 +44,7 @@ source "$SCRIPT_DIR"/common.inc.sh || exit 1
 # Configuration (derived from invocation and options)
 # ------------------------------------------------------------------------------
 declare -- SERVER=${0##*/}         # Target: symlink name, NOT readlink result
-declare -- USER=${USER:-root}      # SSH user (current user or root fallback)
+declare -- SSH_USER=${USER:-root}  # SSH target user (read env $USER as default)
 declare -- CURDIR=''               # Remote directory (-d preserves PWD)
 declare -- CMD=''                  # Remote command (empty = interactive shell)
 declare -- SSHOPTS=''              # SSH options (-t for interactive)
@@ -62,7 +63,7 @@ Usage:
 Options:
   -r, --root                Connect as root
   -u, --user USER           Connect as specified user
-  -c, --connect-timeout S   SSH connect timeout in seconds (default: $CONNECT_TIMEOUT)
+  -c, --connect-timeout SECS  SSH connect timeout in seconds (default: $CONNECT_TIMEOUT)
   -d, --dir                 Preserve current working directory
   -R, --relay HOST          Use HOST as relay on connection failure
   --no-relay                Disable relay failover for this invocation
@@ -81,7 +82,7 @@ Examples:
   $SERVER -rd                       Root shell in current directory
   $SERVER -u deploy git pull        Run as specific user
   $SERVER "df -h | grep data"       Commands with pipes (quote them)
-  $SERVER --relay user@1.2.3.4 cmd  Force relay through specific host
+  $SERVER --relay user@1.2.3.4 cmd  Override relay host (used on failure)
 
 Server Resolution:
   Symlink name '$SERVER' is looked up in hosts.conf to get FQDN.
@@ -94,14 +95,14 @@ HELP
 # ------------------------------------------------------------------------------
 while (($#)); do
   case $1 in
-    -u|--user)    shift; USER=${1:-"${USER:-}"} ;;
-    -r|--root)    USER=root ;;
+    -u|--user)    noarg "$@"; shift; SSH_USER=$1 ;;
+    -r|--root)    SSH_USER=root ;;
     -c|--connect-timeout)
-      shift
-      CONNECT_TIMEOUT=${1:-10}
-      [[ "$CONNECT_TIMEOUT" =~ ^[0-9]+$ ]] || die 22 "Invalid connect-timeout value ${CONNECT_TIMEOUT@Q}" ;;
+      noarg "$@"; shift
+      CONNECT_TIMEOUT=$1
+      [[ $CONNECT_TIMEOUT =~ ^[0-9]+$ ]] || die 22 "Invalid connect-timeout value ${CONNECT_TIMEOUT@Q}" ;;
     -d|--dir)     CURDIR=$PWD ;;
-    -R|--relay)   shift; RELAY=${1:-}; [[ -n "$RELAY" ]] || die 22 "--relay requires a host" ;;
+    -R|--relay)   noarg "$@"; shift; RELAY=$1 ;;
     --no-relay)   NO_RELAY=1 ;;
     -D|--debug)   DEBUG=1 ;;
     -V|--version) echo "$SCRIPT_NAME $VERSION"; exit 0 ;;
@@ -120,7 +121,7 @@ done
 
 # Sanity check: must be invoked via symlink, not directly as 'ok_master'
 if [[ $(basename -- "$SERVER") == "$SCRIPT_NAME" ]]; then
-  die 42 \
+  die 21 \
     "Cannot run ${SCRIPT_NAME@Q} directly." '' \
     'Create a symlink with the server name you want to connect to:' \
     "  ln -s $(command -v ok_master || echo /usr/local/bin/ok_master) /usr/local/bin/myserver" '' \
@@ -138,19 +139,19 @@ fi
 # ------------------------------------------------------------------------------
 get_relay() {
   # CLI flag already set RELAY — return it
-  [[ -n "$RELAY" ]] && { echo "$RELAY"; return 0; }
+  [[ -z $RELAY ]] || { echo "$RELAY"; return 0; }
   # Environment variable
-  if [[ -n "${OKNAV_RELAY:-}" ]]; then
-    [[ "$OKNAV_RELAY" == none ]] && return 1
+  if [[ -n ${OKNAV_RELAY:-} ]]; then
+    [[ $OKNAV_RELAY == none ]] && return 1
     echo "$OKNAV_RELAY"
     return 0
   fi
   # Config file
   local -- conf='/etc/oknav/relay.conf'
-  [[ -f "$conf" ]] || return 1
+  [[ -f $conf ]] || return 1
   local -- line
   while IFS= read -r line; do
-    [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ -z $line || $line =~ ^[[:space:]]*# ]] && continue ||:
     echo "${line%%[[:space:]]*}"
     return 0
   done < "$conf"
@@ -174,28 +175,28 @@ SERVER=$(resolve_alias "$ALIAS") || {
 # ------------------------------------------------------------------------------
 # Command Setup: interactive shell vs command execution
 # ------------------------------------------------------------------------------
-if [[ -z "$CMD" ]]; then
+if [[ -z $CMD ]]; then
   CMD='exec bash'
   SSHOPTS='-t'  # Pseudo-terminal for interactive session
 fi
 
 # Prepend cd if -d option used (path escaped for special chars)
-[[ -z "$CURDIR" ]] || CMD="cd $(printf %q "$CURDIR") && $CMD"
+[[ -z $CURDIR ]] || CMD="cd $(printf %q "$CURDIR") && $CMD"
 
 # Debug: show connection parameters
 if ((DEBUG)); then
   declare -- _relay
   _relay=$(get_relay) || _relay='<none>'
-  ((NO_RELAY)) && _relay='<disabled>'
+  ((!NO_RELAY)) || _relay='<disabled>'
   >&2 echo "DEBUG: Connection parameters:"
   >&2 echo "  ALIAS   = $ALIAS"
   >&2 echo "  SERVER  = $SERVER"
-  >&2 echo "  USER    = $USER"
+  >&2 echo "  USER    = $SSH_USER"
   >&2 echo "  CONN_TIMEOUT = ${CONNECT_TIMEOUT}s"
   >&2 echo "  RELAY   = $_relay"
-  [[ -z "$CURDIR" ]] || >&2 echo "  CURDIR  = $CURDIR"
+  [[ -z $CURDIR ]] || >&2 echo "  CURDIR  = $CURDIR"
   >&2 echo "  COMMAND = ${CMD:-<interactive shell>}"
-  >&2 echo "  SSH     = ssh -o ConnectTimeout=$CONNECT_TIMEOUT $SSHOPTS ${USER}@${SERVER}"
+  >&2 echo "  SSH     = ssh -o ConnectTimeout=$CONNECT_TIMEOUT $SSHOPTS ${SSH_USER}@${SERVER}"
   >&2 echo
 fi
 
@@ -207,14 +208,14 @@ if ((! NO_RELAY)); then
   relay_target=$(get_relay) || relay_target=''
 fi
 
-if [[ -z "$relay_target" ]]; then
+if [[ -z $relay_target ]]; then
   # No relay configured — exec directly (zero overhead, original behavior)
-  exec /usr/bin/ssh -o ConnectTimeout="$CONNECT_TIMEOUT" $SSHOPTS "${USER}@${SERVER}" "$CMD"
+  exec /usr/bin/ssh -o ConnectTimeout="$CONNECT_TIMEOUT" $SSHOPTS "${SSH_USER}@${SERVER}" "$CMD"
 fi
 
 # Relay configured — try direct first, relay on exit 255
 declare -i ssh_exit=0
-/usr/bin/ssh -o ConnectTimeout="$CONNECT_TIMEOUT" $SSHOPTS "${USER}@${SERVER}" "$CMD" \
+/usr/bin/ssh -o ConnectTimeout="$CONNECT_TIMEOUT" $SSHOPTS "${SSH_USER}@${SERVER}" "$CMD" \
   || ssh_exit=$?
 
 if ((ssh_exit == 255)); then
@@ -223,7 +224,7 @@ if ((ssh_exit == 255)); then
     -o "ProxyCommand=ssh -o ConnectTimeout=${CONNECT_TIMEOUT} ${relay_target} 'exec nc -w ${CONNECT_TIMEOUT} %h %p'" \
     -o ConnectTimeout="$CONNECT_TIMEOUT" \
     -o ServerAliveInterval=5 -o ServerAliveCountMax=2 \
-    $SSHOPTS "${USER}@${SERVER}" "$CMD"
+    $SSHOPTS "${SSH_USER}@${SERVER}" "$CMD"
 fi
 exit "$ssh_exit"
 #fin

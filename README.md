@@ -110,7 +110,7 @@ srv1 [OPTIONS] [command]
 |--------|-------------|
 | `-r, --root` | Connect as root |
 | `-u, --user USER` | Connect as specified user |
-| `-c, --connect-timeout S` | SSH connect timeout (default: 10) |
+| `-c, --connect-timeout SECS` | SSH connect timeout (default: 10) |
 | `-d, --dir` | Preserve current working directory |
 | `-R, --relay HOST` | Override relay host for this invocation |
 | `--no-relay` | Disable relay failover for this invocation |
@@ -127,7 +127,7 @@ srv1 -r                      # Root shell
 srv1 -rd                     # Root shell, current directory
 srv1 -u deploy git pull      # Run as specific user
 srv1 "df -h | grep data"     # Complex commands (quote them)
-srv1 --relay relay-host uptime   # Force relay through specific host
+srv1 --relay relay-host uptime   # Override relay host (used on failure)
 srv1 --no-relay uptime           # Disable relay failover
 ```
 
@@ -152,7 +152,7 @@ When an SSH connection fails (exit code 255), ok_master can automatically retry 
 **Examples**:
 
 ```bash
-srv1 --relay jump-host uptime    # Force relay through specific host
+srv1 --relay jump-host uptime    # Override relay host (used on failure)
 srv1 --no-relay uptime           # Disable relay for this invocation
 OKNAV_RELAY=none srv1 uptime     # Disable relay via env
 srv1 -D uptime                   # Debug output shows relay status
@@ -171,8 +171,8 @@ oknav [OPTIONS] -- <command>    # Force command mode
 |--------|-------------|
 | `-p, --parallel` | Execute simultaneously |
 | `-d, --dir` | Preserve current working directory |
-| `-c, --connect-timeout S` | SSH connect timeout (default: 10) |
-| `-t, --timeout SECS` | Execution timeout (default: 120) |
+| `-c, --connect-timeout SECS` | SSH connect timeout (default: 10) |
+| `-t, --timeout SECS` | Per-server execution timeout (default: 120) |
 | `-x, --exclude-host HOST` | Exclude server (repeatable) |
 | `-D, --debug` | Show server discovery details |
 | `--` | Force command mode (bypass subcommand detection) |
@@ -344,7 +344,7 @@ bats tests/oknav.bats --filter "parallel"
 | `oknav` | `-p` | Parallel execution |
 | `oknav` | `-d` | Preserve directory |
 | `oknav` | `-c SECS` | SSH connect timeout (default: 10) |
-| `oknav` | `-t SECS` | Execution timeout (default: 120) |
+| `oknav` | `-t SECS` | Per-server execution timeout (default: 120) |
 | `oknav` | `-x HOST` | Exclude host (repeatable) |
 | `oknav` | `-D` | Debug mode |
 | `oknav` | `--` | Force command mode |
@@ -360,14 +360,19 @@ bats tests/oknav.bats --filter "parallel"
 
 ### Exit Codes
 
+| Code | Tool | Meaning |
+|------|------|---------|
+| 0 | both | Success |
+| 1 | both | General error |
+| 2 | ok_master | Local-only constraint violated |
+| 22 | both | Invalid option (EINVAL) |
+| 42 | ok_master | Direct execution (must use symlink) |
+
+**Per-server status codes** (from `timeout(1)`, shown as output messages by `oknav` — absorbed, not propagated as exit codes):
+
 | Code | Meaning |
 |------|---------|
-| 0 | Success |
-| 1 | General error |
-| 2 | Local-only constraint violated |
-| 22 | Invalid option (EINVAL) |
-| 42 | Direct ok_master execution (must use symlink) |
-| 124 | Timeout reached |
+| 124 | Execution timeout reached |
 | 125 | Timeout command error |
 | 126 | Command not found |
 
@@ -378,7 +383,7 @@ bats tests/oknav.bats --filter "parallel"
 | `OKNAV_CONNECT_TIMEOUT` | Override default SSH connect timeout (default: 10) |
 | `OKNAV_HOSTS_CONF` | Override hosts.conf location |
 | `OKNAV_RELAY` | Override relay host for ok_master (set to `none` to disable) |
-| `OKNAV_TARGET_DIR` | Override target directory (for testing) |
+| `OKNAV_TARGET_DIR` | Override target directory for `oknav list` (defaults to `/usr/local/bin`) |
 | `XDG_RUNTIME_DIR` | Temp file location (falls back to `/tmp`) |
 
 ### File Structure
@@ -449,9 +454,10 @@ oknav/
 
 **Timeout errors**
 - Connect timeout (`-c`): controls SSH handshake (default: 10s)
-- Execution timeout (`-t`): controls total time (default: 120s)
+- Execution timeout (`-t`): per-server SSH call timeout (default: 120s)
 - Use `-c SECS` for unreachable hosts to fail fast
 - Use `-t SECS` for long-running commands
+- In sequential mode, total wall-clock can reach N × `-t SECS`
 
 **"No servers found"**
 - Verify `hosts.conf` has entries with `(oknav)` option
