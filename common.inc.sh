@@ -86,6 +86,12 @@ fi
 # Streams: vecho → stdout, all others → stderr.
 # Prefixes: ◉ info, ▲ warn, ✓ success, ✗ error, 'DEBUG:' for debug.
 # ------------------------------------------------------------------------------
+# _msg() interpolates $SCRIPT_NAME and $1 into the printf format string
+# intentionally: $1 is always a hardcoded color+icon prefix from one of the
+# wrappers below (no %), and $SCRIPT_NAME comes from ${0##*/}. The
+# interpolation lets printf reuse the format across "${@:2}" so multiple
+# messages share one call. Do not "fix" by moving them to %s args — that
+# breaks the per-arg loop.
 _msg() { >&2 printf "$SCRIPT_NAME: $1 %s\n" "${@:2}"; }
 error()   { _msg "$RED✗$NC" "$@"; }
 # die() - Print error and exit

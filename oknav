@@ -226,6 +226,11 @@ HELP
   ((dry_run)) && info '[dry-run] No changes will be made' ||:
 
   # Create symlinks for all aliases in hosts.conf
+  # NOTE: All readlink uses below (and in add_host/remove_host/list_hosts)
+  # are intentional, not realpath. We compare against the literal target
+  # string given to `ln -sf` -- realpath would recurse through any further
+  # symlink chain (e.g. /usr/local/bin/ok_master -> share/oknav/ok_master)
+  # and break the identity check, plus it errors on broken links.
   local -- alias target
   for alias in "${ALIAS_LIST[@]}"; do
     target="$target_dir"/"$alias"
