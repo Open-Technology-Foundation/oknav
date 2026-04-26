@@ -133,6 +133,68 @@ load test_helper
 }
 
 # ==============================================================================
+# VERBOSE / DEBUG Gating Tests
+# ==============================================================================
+# common.inc.sh:73 declares VERBOSE=1 DEBUG=0 by default. info/success/vecho/warn
+# require VERBOSE=1; debug requires DEBUG=1 independently. error always outputs.
+
+@test "info() is silent when VERBOSE=0" {
+  run bash -c 'export SCRIPT_NAME=test; source '"${PROJECT_DIR}"'/common.inc.sh; VERBOSE=0; info "hello" 2>&1'
+  [[ -z "$output" ]]
+}
+
+@test "info() outputs to stderr when VERBOSE=1 (default)" {
+  run bash -c 'export SCRIPT_NAME=test; source '"${PROJECT_DIR}"'/common.inc.sh; info "hello info" 2>&1'
+  assert_output_contains "hello info"
+  assert_output_contains "◉"
+}
+
+@test "success() is silent when VERBOSE=0" {
+  run bash -c 'export SCRIPT_NAME=test; source '"${PROJECT_DIR}"'/common.inc.sh; VERBOSE=0; success "ok" 2>&1'
+  [[ -z "$output" ]]
+}
+
+@test "success() outputs when VERBOSE=1 with check icon" {
+  run bash -c 'export SCRIPT_NAME=test; source '"${PROJECT_DIR}"'/common.inc.sh; success "all good" 2>&1'
+  assert_output_contains "all good"
+  assert_output_contains "✓"
+}
+
+@test "vecho() is silent when VERBOSE=0" {
+  run bash -c 'export SCRIPT_NAME=test; source '"${PROJECT_DIR}"'/common.inc.sh; VERBOSE=0; vecho "verbose msg"'
+  [[ -z "$output" ]]
+}
+
+@test "vecho() outputs to stdout (not stderr) when VERBOSE=1" {
+  # Capture stdout only; redirect stderr to /dev/null to verify vecho writes stdout.
+  run bash -c 'export SCRIPT_NAME=test; source '"${PROJECT_DIR}"'/common.inc.sh; vecho "verbose stdout" 2>/dev/null'
+  assert_output_contains "verbose stdout"
+}
+
+@test "warn() outputs even when VERBOSE=0 (no gate)" {
+  # warn() is intentionally ungated in common.inc.sh:101 — warnings always
+  # surface regardless of VERBOSE. This pin documents that current behaviour.
+  run bash -c 'export SCRIPT_NAME=test; source '"${PROJECT_DIR}"'/common.inc.sh; VERBOSE=0; warn "warn msg" 2>&1'
+  assert_output_contains "warn msg"
+}
+
+@test "error() outputs even when VERBOSE=0" {
+  run bash -c 'export SCRIPT_NAME=test; source '"${PROJECT_DIR}"'/common.inc.sh; VERBOSE=0; error "err msg" 2>&1'
+  assert_output_contains "err msg"
+}
+
+@test "debug() with DEBUG=1 VERBOSE=0 still outputs (independent gate)" {
+  run bash -c 'export SCRIPT_NAME=test; source '"${PROJECT_DIR}"'/common.inc.sh; VERBOSE=0; DEBUG=1; debug "dbg msg" 2>&1'
+  assert_output_contains "dbg msg"
+  assert_output_contains "DEBUG:"
+}
+
+@test "debug() with DEBUG=0 VERBOSE=1 stays silent" {
+  run bash -c 'export SCRIPT_NAME=test; source '"${PROJECT_DIR}"'/common.inc.sh; VERBOSE=1; DEBUG=0; debug "dbg" 2>&1'
+  [[ -z "$output" ]]
+}
+
+# ==============================================================================
 # remblanks() Function Tests
 # ==============================================================================
 

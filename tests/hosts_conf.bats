@@ -164,6 +164,96 @@ EOF
 }
 
 # ==============================================================================
+# Malformed Input Tests (pin current behaviour)
+# ==============================================================================
+# These tests document how the parser treats imperfect input. They pin current
+# behaviour rather than prescribe ideal behaviour — see NOTES-IMPROVEMENTS.md
+# if any of these turn out to be undesirable.
+
+@test "load_hosts_conf treats empty () as no options" {
+  # Empty parens: regex requires content inside, so options stays empty.
+  # The line tail '(' is stripped via parameter expansion, alias still parses.
+  create_hosts_conf "$TEST_TEMP_DIR" "server.local  sp  ()"
+
+  run bash -c '
+    export SCRIPT_NAME=test SCRIPT_DIR="'"$TEST_TEMP_DIR"'"
+    source "'"${PROJECT_DIR}"'/common.inc.sh"
+    load_hosts_conf
+    echo "fqdn=${ALIAS_TO_FQDN[sp]:-MISSING} opts=${ALIAS_OPTIONS[sp]:-EMPTY}"
+  '
+  ((status == 0))
+  [[ "$output" == "fqdn=server.local opts=EMPTY" ]]
+}
+
+@test "load_hosts_conf last-write-wins on duplicate alias" {
+  cat > "${TEST_TEMP_DIR}/hosts.conf" <<'EOF'
+server1.local  dup
+server2.local  dup
+EOF
+
+  run bash -c '
+    export SCRIPT_NAME=test SCRIPT_DIR="'"$TEST_TEMP_DIR"'"
+    export OKNAV_HOSTS_CONF="'"$TEST_TEMP_DIR"'/hosts.conf"
+    source "'"${PROJECT_DIR}"'/common.inc.sh"
+    load_hosts_conf
+    echo "${ALIAS_TO_FQDN[dup]}"
+  '
+  ((status == 0))
+  # Current behaviour: second entry overwrites first.
+  [[ "$output" == "server2.local" ]]
+}
+
+@test "load_hosts_conf silently skips line with FQDN but no alias" {
+  cat > "${TEST_TEMP_DIR}/hosts.conf" <<'EOF'
+lonely.local
+real.local  realsrv
+EOF
+
+  run bash -c '
+    export SCRIPT_NAME=test SCRIPT_DIR="'"$TEST_TEMP_DIR"'"
+    export OKNAV_HOSTS_CONF="'"$TEST_TEMP_DIR"'/hosts.conf"
+    source "'"${PROJECT_DIR}"'/common.inc.sh"
+    load_hosts_conf
+    echo "count=${#ALIAS_TO_FQDN[@]} realsrv=${ALIAS_TO_FQDN[realsrv]:-MISSING}"
+  '
+  ((status == 0))
+  # Only the entry with an alias is registered; FQDN-only line silently dropped.
+  [[ "$output" == "count=1 realsrv=real.local" ]]
+}
+
+@test "load_hosts_conf passes through unknown option keywords" {
+  create_hosts_conf "$TEST_TEMP_DIR" "server.local  srv  (foobar)"
+
+  run bash -c '
+    export SCRIPT_NAME=test SCRIPT_DIR="'"$TEST_TEMP_DIR"'"
+    source "'"${PROJECT_DIR}"'/common.inc.sh"
+    load_hosts_conf
+    is_excluded srv && echo "excluded" || echo "not-excluded"
+    is_oknav srv && echo "oknav" || echo "not-oknav"
+    echo "opts=${ALIAS_OPTIONS[srv]}"
+  '
+  ((status == 0))
+  assert_output_contains "not-excluded"
+  assert_output_contains "not-oknav"
+  assert_output_contains "opts=foobar"
+}
+
+@test "load_hosts_conf treats (local-only:) with empty host as no constraint" {
+  # Regex requires [^,)]+ inside local-only — empty value won't match,
+  # so resolve_alias enforces no constraint and returns the FQDN normally.
+  create_hosts_conf "$TEST_TEMP_DIR" "dev.local  okdev  (local-only:)"
+
+  run bash -c '
+    export SCRIPT_NAME=test SCRIPT_DIR="'"$TEST_TEMP_DIR"'"
+    source "'"${PROJECT_DIR}"'/common.inc.sh"
+    load_hosts_conf
+    resolve_alias okdev
+  '
+  ((status == 0))
+  [[ "$output" == "dev.local" ]]
+}
+
+# ==============================================================================
 # resolve_alias() Tests
 # ==============================================================================
 

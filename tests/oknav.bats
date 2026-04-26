@@ -960,4 +960,111 @@ EOF
   [[ "$output" != *"✓"* ]] && [[ "$output" != *"✗"* ]]
 }
 
+# ==============================================================================
+# find_hosts_conf() Priority Tests
+# ==============================================================================
+# common.inc.sh:160 priority order: $OKNAV_HOSTS_CONF → /etc/oknav/hosts.conf
+# → $SCRIPT_DIR/hosts.conf. Only the env override and SCRIPT_DIR fallback can
+# be tested without root; /etc/oknav/ priority is documented in NOTES-IMPROVEMENTS.
+
+@test "find_hosts_conf: OKNAV_HOSTS_CONF env wins over script-dir hosts.conf" {
+  # Place a script-dir file with one alias, and an env-pointed file with another.
+  echo "from-script-dir.local  scriptsrv" > "${TEST_TEMP_DIR}/hosts.conf"
+  mkdir -p "${TEST_TEMP_DIR}/elsewhere"
+  echo "from-env.local  envsrv" > "${TEST_TEMP_DIR}/elsewhere/hosts.conf"
+
+  run bash -c '
+    export SCRIPT_NAME=test SCRIPT_DIR="'"$TEST_TEMP_DIR"'"
+    export OKNAV_HOSTS_CONF="'"$TEST_TEMP_DIR"'/elsewhere/hosts.conf"
+    source "'"${PROJECT_DIR}"'/common.inc.sh"
+    find_hosts_conf
+  '
+  ((status == 0))
+  [[ "$output" == "${TEST_TEMP_DIR}/elsewhere/hosts.conf" ]]
+}
+
+@test "find_hosts_conf: env override pointing to non-existent file falls through" {
+  # Env points to missing file → must fall back to next available source.
+  # If /etc/oknav/hosts.conf exists on the system that wins; otherwise script dir.
+  echo "from-script-dir.local  scriptsrv" > "${TEST_TEMP_DIR}/hosts.conf"
+
+  run bash -c '
+    export SCRIPT_NAME=test SCRIPT_DIR="'"$TEST_TEMP_DIR"'"
+    export OKNAV_HOSTS_CONF=/nonexistent/path/hosts.conf
+    source "'"${PROJECT_DIR}"'/common.inc.sh"
+    find_hosts_conf
+  '
+  ((status == 0))
+  # On a system without /etc/oknav/hosts.conf, expect script-dir result;
+  # otherwise expect /etc/oknav/hosts.conf. Both are valid depending on env.
+  [[ "$output" == "${TEST_TEMP_DIR}/hosts.conf" \
+     || "$output" == "/etc/oknav/hosts.conf" ]]
+}
+
+@test "find_hosts_conf: SCRIPT_DIR fallback when no env and no /etc/oknav/" {
+  # Skip if system /etc/oknav/hosts.conf exists — it would take priority.
+  [[ -f /etc/oknav/hosts.conf ]] && skip "system /etc/oknav/hosts.conf would shadow SCRIPT_DIR fallback"
+  echo "fallback.local  fb" > "${TEST_TEMP_DIR}/hosts.conf"
+
+  run bash -c '
+    export SCRIPT_NAME=test SCRIPT_DIR="'"$TEST_TEMP_DIR"'"
+    unset OKNAV_HOSTS_CONF
+    source "'"${PROJECT_DIR}"'/common.inc.sh"
+    find_hosts_conf
+  '
+  ((status == 0))
+  [[ "$output" == "${TEST_TEMP_DIR}/hosts.conf" ]]
+}
+
+# ==============================================================================
+# install Subcommand: Reserved-Name Collision (parity with add)
+# ==============================================================================
+# install_symlinks() warns when an alias collides with a subcommand name;
+# add_host() does NOT currently warn. Pin install behaviour for all subcommand
+# names beyond just 'install' (currently only one is tested).
+
+@test "install warns when alias matches subcommand 'add'" {
+  setup_oknav_env ok0
+  # Append an alias with the reserved name 'add'.
+  printf '%s\n' "addmachine.local  add  (oknav)" >> "${TEST_TEMP_DIR}/hosts.conf"
+  cd "$TEST_TEMP_DIR" || return 1
+  run ./oknav install --dry-run
+  assert_output_contains "conflicts with oknav subcommand"
+  assert_output_contains "add"
+}
+
+@test "install warns when alias matches subcommand 'remove'" {
+  setup_oknav_env ok0
+  printf '%s\n' "rm.local  remove  (oknav)" >> "${TEST_TEMP_DIR}/hosts.conf"
+  cd "$TEST_TEMP_DIR" || return 1
+  run ./oknav install --dry-run
+  assert_output_contains "conflicts with oknav subcommand"
+  assert_output_contains "remove"
+}
+
+@test "install warns when alias matches subcommand 'list'" {
+  setup_oknav_env ok0
+  printf '%s\n' "ls.local  list  (oknav)" >> "${TEST_TEMP_DIR}/hosts.conf"
+  cd "$TEST_TEMP_DIR" || return 1
+  run ./oknav install --dry-run
+  assert_output_contains "conflicts with oknav subcommand"
+  assert_output_contains "list"
+}
+
+# ==============================================================================
+# Parallel Mode: Missing Marker File Warning
+# ==============================================================================
+# oknav:812 emits "Output file for X not found" when a server's marker file
+# is absent in parallel mode. Pin the warning text so future refactors don't
+# silently regress it.
+
+@test "parallel mode warns text is present in source" {
+  # Static check: ensure the warning string exists in the codebase. This
+  # protects against silent removal during cleanup refactors. A live fault
+  # injection test is impractical without rewriting the parallel path.
+  run grep -F 'Output file for' "${PROJECT_DIR}/oknav"
+  ((status == 0))
+  assert_output_contains "not found"
+}
+
 #fin
