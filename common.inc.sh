@@ -53,7 +53,7 @@ readonly _OKNAV_COMMON_LOADED=1
 
 # Global configuration
 ### VERSION managed by version
-declare -r VERSION=2.3.8
+declare -r VERSION=2.3.9
 ###
 
 # Set up runtime directory for temporary files
@@ -81,8 +81,8 @@ fi
 
 # ------------------------------------------------------------------------------
 # Messaging Functions
-# Output gating: vecho/info/warn/success require VERBOSE=1;
-#   debug requires DEBUG=1 (independent of VERBOSE); error always outputs.
+# Output gating: vecho/info/success require VERBOSE=1; warn/error always output;
+#   debug requires DEBUG=1 (independent of VERBOSE).
 # Streams: vecho → stdout, all others → stderr.
 # Prefixes: ◉ info, ▲ warn, ✓ success, ✗ error, 'DEBUG:' for debug.
 # ------------------------------------------------------------------------------

@@ -121,6 +121,33 @@ report_timeout_error() {
 }
 
 # ------------------------------------------------------------------------------
+# ssh_reachable() - Quick SSH liveness probe for `oknav list -R`
+# Args: fqdn
+# Returns: 0 if the host answered `hostname` over SSH, non-zero otherwise
+# The 10s total / 3s connect literals are an intentional fast probe: `list -R`
+# wants a snappy reachability snapshot, not the longer cluster-exec timeouts.
+# ------------------------------------------------------------------------------
+ssh_reachable() {
+  local -- fqdn=$1
+  timeout 10 ssh -o ConnectTimeout=3 -o BatchMode=yes "$fqdn" hostname >/dev/null 2>&1
+}
+
+# ------------------------------------------------------------------------------
+# print_host_row() - Emit one `oknav list` table row
+# Args: name source [status]
+# With a status (3rd arg) prints the reachability layout (NAME SOURCE STATUS);
+# without it, the plain layout (NAME SOURCE). Keeps both printf formats in one
+# place so the display loops stay identical.
+# ------------------------------------------------------------------------------
+print_host_row() {
+  if (($# >= 3)); then
+    printf '%-12s %-10s  %s\n' "$1" "$2" "$3"
+  else
+    printf '%-12s %s\n' "$1" "$2"
+  fi
+}
+
+# ------------------------------------------------------------------------------
 # usage() - Display help message
 # ------------------------------------------------------------------------------
 usage() {
@@ -463,10 +490,6 @@ list_hosts() {
   local -i reachable_check=0
   local -i parallel_mode=0
 
-  # Locate ok_master: prefer installed location, fall back to dev directory
-  local -- ok_master=/usr/local/share/oknav/ok_master
-  [[ -f $ok_master ]] || ok_master="$SCRIPT_DIR"/ok_master
-
   # Parse options
   while (($#)); do
     case $1 in
@@ -474,6 +497,10 @@ list_hosts() {
         reachable_check=1 ;;
       -p|--parallel)
         parallel_mode=1 ;;
+      -[Rph]?*)
+        # Split combined short flags (e.g. -Rp → -R -p), matching ok_master.
+        set -- "${1:0:2}" "-${1:2}" "${@:2}"
+        continue ;;
       -h|--help)
         cat <<'HELP'
 Usage: oknav list [-R] [-p]
@@ -536,74 +563,51 @@ HELP
     host_info+=("$name:$source:$fqdn")
   done
 
-  # Display with status
-  if ((reachable_check)); then
-    if ((parallel_mode)); then
-      # Parallel reachability check
-      local -a pids=() temp_files=()
-      local -- temp_file
-      ensure_run_dir
-
-      for info in "${host_info[@]}"; do
-        name=${info%%:*}
-        temp_file=$(mktemp "$RUN_DIR"/oknav_list_"$name"_XXXXXX) || continue
-        temp_files+=("$temp_file")
-
-        # Background SSH test
-        ( fqdn=${info##*:}
-          if timeout 10 ssh -o ConnectTimeout=3 -o BatchMode=yes "$fqdn" hostname >/dev/null 2>&1; then
-            echo '✓'
-          else
-            echo '✗'
-          fi
-        ) > "$temp_file" 2>/dev/null &
-        pids+=($!)
-      done
-
-      # Wait for all background processes
-      for pid in "${pids[@]}"; do
-        wait "$pid" 2>/dev/null || true
-      done
-
-      # Display results in order
-      local -i i=0
-      local -- status
-      for info in "${host_info[@]}"; do
-        name=${info%%:*}
-        source=${info#*:}
-        source=${source%%:*}
-        status=$(<"${temp_files[$i]}") || status='✗'
-        printf '%-12s %-10s  %s\n' "$name" "$source" "$status"
-        i+=1
-      done
-
-      # Cleanup temp files
-      rm -f "${temp_files[@]}" 2>/dev/null || true
-    else
-      # Sequential reachability check
-      local -- status
-      for info in "${host_info[@]}"; do
-        name=${info%%:*}
-        source=${info#*:}
-        source=${source%%:*}
-        fqdn="${info##*:}"
-        if timeout 10 ssh -o ConnectTimeout=3 -o BatchMode=yes "$fqdn" hostname >/dev/null 2>&1; then
-          status='✓'
-        else
-          status='✗'
-        fi
-        printf '%-12s %-10s  %s\n' "$name" "$source" "$status"
-      done
-    fi
-  else
-    # No reachability check - just list
+  # Parallel reachability pre-phase: probe every host concurrently, each writing
+  # its result to a run-scoped file keyed by NAME (not a positional index). The
+  # name key makes host/result desync structurally impossible -- a missing or
+  # empty file simply reads back as unreachable (✗) in the display loop below.
+  if ((reachable_check && parallel_mode)); then
+    ensure_run_dir
+    local -a pids=()
     for info in "${host_info[@]}"; do
       name=${info%%:*}
-      source=${info#*:}
-      source=${source%%:*}
-      printf '%-12s %s\n' "$name" "$source"
+      fqdn=${info##*:}
+      ( if ssh_reachable "$fqdn"; then echo '✓'; else echo '✗'; fi ) \
+        > "$RUN_DIR/list_$name" 2>/dev/null &
+      pids+=($!)
+    done
+    for pid in "${pids[@]}"; do
+      wait "$pid" 2>/dev/null || true
     done
   fi
+
+  # Unified display loop: one pass over host_info for every mode. Each record is
+  # unpacked once; status is resolved per mode (parallel: read the probe file;
+  # sequential: probe inline) and rendered via print_host_row.
+  local -- status result_file
+  for info in "${host_info[@]}"; do
+    name=${info%%:*}
+    source=${info#*:}
+    source=${source%%:*}
+    if ((reachable_check)); then
+      if ((parallel_mode)); then
+        # Read this host's probe result by name; absent/empty/non-file → ✗.
+        result_file="$RUN_DIR/list_$name"
+        status='✗'
+        if [[ -f $result_file ]]; then
+          status=$(<"$result_file")
+          [[ -n $status ]] || status='✗'
+        fi
+      else
+        fqdn=${info##*:}
+        if ssh_reachable "$fqdn"; then status='✓'; else status='✗'; fi
+      fi
+      print_host_row "$name" "$source" "$status"
+    else
+      print_host_row "$name" "$source"
+    fi
+  done
 }
 
 # Parse command line arguments

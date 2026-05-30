@@ -412,13 +412,30 @@ setup_oknav_env() {
   assert_output_contains "+++ok1:"
 }
 
-@test "parallel mode maintains output order" {
+@test "parallel mode displays output in server order regardless of completion" {
   setup_oknav_env ok0 ok1 ok2
+  # Override sudo (scoped to this test) to sleep inversely by server name so that
+  # completion order is the REVERSE of display order: ok2 finishes first, ok0
+  # last. The parent must still emit ok0, ok1, ok2 in hosts.conf order, proving
+  # it re-orders by SERVERS rather than appending in completion order.
+  cat > "${MOCK_BIN}/sudo" <<EOF
+#!/bin/bash
+echo "SUDO_CALL: \$*" >> "$MOCK_LOG"
+case "\$1" in
+  ok0) sleep 0.30 ;;
+  ok1) sleep 0.15 ;;
+  ok2) sleep 0.05 ;;
+esac
+"\$@"
+EOF
+  chmod +x "${MOCK_BIN}/sudo"
   cd "$TEST_TEMP_DIR" || return 1
 
   run ./oknav -p uptime
-  # All servers should appear in output
   ((status == 0))
+  # Glob (not regex): '*' spans newlines, so this asserts ok0 precedes ok1
+  # precedes ok2 across the multi-line output regardless of finish order.
+  [[ "$output" == *"+++ok0:"*"+++ok1:"*"+++ok2:"* ]]
 }
 
 @test "parallel mode cleans up its run dir on exit" {
@@ -989,6 +1006,39 @@ EOF
   assert_output_contains "hosts.conf"
   # Should not have reachability symbols when -R not specified
   [[ "$output" != *"✓"* ]] && [[ "$output" != *"✗"* ]]
+}
+
+@test "oknav list -Rp renders ✗ for a host whose result file is absent" {
+  setup_oknav_env ok0 ok1 ok2
+  # Pin RUN_DIR to a known path so we can deterministically block one host's
+  # probe result. Mock mktemp -d to return our fixed dir; pass other calls through.
+  local run_dir="${TEST_TEMP_DIR}/runtime/oknav.fixed"
+  mkdir -p "$run_dir"
+  cat > "${MOCK_BIN}/mktemp" <<EOF
+#!/bin/bash
+for a in "\$@"; do
+  if [[ \$a == -d ]]; then
+    echo "$run_dir"
+    exit 0
+  fi
+done
+exec /usr/bin/mktemp "\$@"
+EOF
+  chmod +x "${MOCK_BIN}/mktemp"
+  # Block ok1's result file: a directory at list_ok1 makes the probe redirect
+  # fail, so no regular result file is ever written for that host. The unified
+  # read loop must fall back to ✗ for the ok1 row -- proving the no-desync
+  # contract (missing file → ✗, no unbound-variable abort).
+  mkdir -p "${run_dir}/list_ok1"
+  cd "$TEST_TEMP_DIR" || return 1
+
+  OKNAV_TARGET_DIR="$TEST_TEMP_DIR" run timeout 15 ./oknav list -Rp
+  ((status == 0))
+  assert_output_not_contains "unbound variable"
+  # All three rows present, in symlink-sorted order (proves order preserved).
+  [[ "$output" == *"ok0"*"ok1"*"ok2"* ]]
+  # ok1 (blocked result file) renders ✗ via the absent-file fallback.
+  [[ "$output" == *"ok1"*"✗"* ]]
 }
 
 # ==============================================================================
