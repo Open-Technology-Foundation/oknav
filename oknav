@@ -93,7 +93,7 @@ ensure_run_dir() {
 # Used in command substitution to conditionally add -d to server commands.
 # Returns: 0 always (safe for set -e)
 # ------------------------------------------------------------------------------
-preserve_dir() { ((PRESERVE_DIR == 0)) || echo '-d'; }
+preserve_dir() { ((!PRESERVE_DIR)) || echo '-d'; }
 
 # ------------------------------------------------------------------------------
 # connect_timeout_opt() - Output -c N for connect timeout
@@ -129,7 +129,7 @@ report_timeout_error() {
 # ------------------------------------------------------------------------------
 ssh_reachable() {
   local -- fqdn=$1
-  timeout 10 ssh -o ConnectTimeout=3 -o BatchMode=yes "$fqdn" hostname >/dev/null 2>&1
+  timeout 10 ssh -o ConnectTimeout=3 -o BatchMode=yes "$fqdn" hostname &>/dev/null
 }
 
 # ------------------------------------------------------------------------------

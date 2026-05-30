@@ -53,7 +53,7 @@ readonly _OKNAV_COMMON_LOADED=1
 
 # Global configuration
 ### VERSION managed by version
-declare -r VERSION=2.3.9
+declare -r VERSION=2.3.10
 ###
 
 # Set up runtime directory for temporary files
